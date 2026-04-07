@@ -43,7 +43,7 @@ export class FarmingService {
             
             await this.replantCrop(pos, cropName)
         } catch (err) {
-            console.error(`[farming] runOnce error: ${err.message}`)
+            console.error(`[farming] runFarmingCycle error: ${err.message}`)
 
             if (crop?.position) {
                 this.markTargetCooldown(crop.position, 5000)
@@ -64,24 +64,22 @@ export class FarmingService {
     async findHarvestableCrop() {
         const bot = this.ctx.bot
 
-        const crop = bot.findBlock({
+        const positions = bot.findBlocks({
             maxDistance: 16,
-            matching: (block) => {
-                // TODO: check why this doesnt
-                if (!block) {
-                    console.log(`Block is null ${block}`)
-                    return false
-                } 
-                // if (!block.position) {
-                //     console.log(`Block position is null ${block.position}`)
-                //     return false
-                // } 
-
-                return this.isHarvestableCrop(block) && !this.isOnCooldown(block.position)
-            }
+            count: 20,
+            matching: (block) => this.isHarvestableCrop(block)
         })
 
-        return crop ?? null
+        for (const pos of positions) {
+            const block = bot.blockAt(pos)
+            if (!block) continue
+            if (!block.position) continue
+            if (this.isOnCooldown(block.position)) continue
+
+            return block
+        }
+
+        return null
     }
 
     isHarvestableCrop(block) {
@@ -195,7 +193,6 @@ export class FarmingService {
 
         await bot.equip(seedItem, 'hand')
         await bot.placeBlock(blockBelow, new Vec3(0, 1, 0))
-
         console.log(`[farming] replanted ${cropName}`)
     }
 

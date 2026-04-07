@@ -13,7 +13,7 @@ export class FarmerRole extends BaseRole {
         try {
             while (this.active && ctx.bot && ctx.bot.entity) {
                 await ctx.services.farming.runFarmingCycle()
-                await sleep(1000)
+                await sleep(800)
             }
         } catch (err) {
             if (this.active) {
