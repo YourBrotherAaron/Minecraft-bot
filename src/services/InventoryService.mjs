@@ -25,8 +25,8 @@ export class InventoryService{
         return this.getInventoryItems().length
     }
 
-    isInventoryNearlyFull(threshhold = 30) {
-        return this.getUsedSlotCount() >= threshhold
+    isInventoryNearlyFull(threshold = 30) {
+        return this.getUsedSlotCount() >= threshold
     }
 
     printInventory() {

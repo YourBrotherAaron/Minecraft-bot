@@ -76,7 +76,7 @@ export class StorageService {
             if (!depositedAnything) {
                 console.log('[storage] nothing needed to be deposited')
             } else {
-                console.log('[storage] nothing needed to be deposited')
+                console.log('[storage] deposited items into chest')
             }
 
             return true
