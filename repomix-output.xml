@@ -59,172 +59,6 @@ src/utils/sleep.mjs
 <files>
 This section contains the contents of the repository's files.
 
-<file path="src/services/InventoryService.mjs">
-export class InventoryService{
-    constructor(ctx) {
-        this.ctx = ctx
-    }
-
-    getInventoryItems() {
-        return this.ctx.bot.inventory.items()
-    }
-
-    findItemByName(itemName) {
-        return this.getInventoryItems().find(item => item.name === itemName) ?? null
-    }
-
-    countItem(itemName) {
-        return this.getInventoryItems()
-            .filter(item => item.name === itemName)
-            .reduce((total, item) => total + item.count, 0)
-    }
-
-    hasItem(itemName, minCount = 1) {
-        return this.countItem(itemName) >= minCount
-    }
-
-    getUsedSlotCount() {
-        return this.getInventoryItems().length
-    }
-
-    isInventoryNearlyFull(threshhold = 30) {
-        return this.getUsedSlotCount() >= threshhold
-    }
-
-    printInventory() {
-        const items = this.getInventoryItems()
-
-        if (items.length === 0) {
-            console.log('[inventory] inventory is empty')
-            return
-        }
-
-        console.log('[inventory] items:')
-        for (const item of items) {
-            console.log(`- ${item.name} x${item.count}`)
-        }
-    }
-}
-</file>
-
-<file path="src/services/StorageService.mjs">
-import { sleep } from "../utils/sleep.mjs"
-
-export class StorageService {
-    constructor(ctx) {
-        this.ctx = ctx
-        this.recentChests = new Map()
-    }
-
-    findNearestChest(maxDistance = 16) {
-        const bot = this.ctx.bot
-
-        const positions = bot.findBlocks({
-            maxDistance,
-            count: 20,
-            matching: (block) => {
-                if(!block) return false
-                return block.name === 'chest'
-            }
-        })
-
-        for (const pos of positions) {
-            const block = bot.blockAt(pos)
-            if (!block) continue
-            if (!block.position) continue
-            if (this.isChestOnCooldown(block.position)) continue
-
-            return block
-        }
-
-        return null
-    }
-
-    async depositExcessItems(keepAmmounts = {}) {
-        const bot = this.ctx.bot
-        const chestBlock = this.findNearestChest()
-
-        if (!chestBlock) {
-            console.log('[storage] no chest found nearby')
-            return false
-        }
-
-        await this.ctx.services.movement.goNear(chestBlock.position, 2)
-
-        let chest
-
-        
-        try {
-            chest = await bot.openContainer(chestBlock)
-            
-            const items = bot.inventory.items()
-
-            // Total counts per item name
-            const totalCounts = {}
-            for (const item of items) {
-                totalCounts[item.name] = (totalCounts[item.name] ?? 0) + item.count
-            }
-
-            // how many of each item needs to be deposited
-            const remainingToDeposit = {}
-            for (const [itemName, total] of Object.entries(totalCounts)) {
-                const keepAmmount = keepAmmounts[itemName] ?? 0
-                const excess = total - keepAmmount
-                remainingToDeposit[itemName] = Math.max(0, excess)
-            }
-
-            for (const item of items) {
-                const ammountToDeposit = remainingToDeposit[item.name] ?? 0
-                if (ammountToDeposit <= 0) continue
-
-                const ammountToDepositNow = Math.min(item.count, ammountToDeposit)
-
-                console.log(`[storage] depositing ${item.name} x${ammountToDepositNow}`)
-                await chest.deposit(item.type, null, ammountToDepositNow)
-                remainingToDeposit[item.name] -= ammountToDepositNow
-                await sleep(500)
-            }
-
-            console.log('[storage] deposited items into chest')
-            return true
-        } catch(err) {
-            console.log(`[storage] deposit failed: ${err.message}`)
-            this.markChestCooldown(chestBlock.position, 30000)
-            return false
-        } finally {
-            chest.close()
-        }
-    }
-
-    getChestKey(position) {
-        if (!position) return null
-        return `${position.x},${position.y},${position.z}`
-    }
-
-    isChestOnCooldown(position) {
-        const key = this.getChestKey(position)
-        if (!key) return false
-
-        const until = this.recentChests.get(key)
-        if (!until) return false
-
-        if (Date.now() > until) {
-            this.recentChests.delete(key)
-            return false
-        }
-
-        return true
-    }
-
-    markChestCooldown(position, ms = 5000) {
-        const key = this.getChestKey(position)
-        if (!key) return
-
-        this.recentChests.set(key, Date.now() + ms)
-    }
-}
-</file>
-
 <file path="index.mjs">
 import { botConfig } from './src/config/botConfig.mjs'
 import { BotManager } from './src/core/BotManager.mjs'
@@ -281,87 +115,50 @@ export class BotContext {
 }
 </file>
 
-<file path="src/core/BotManager.mjs">
-import mineflayer from 'mineflayer'
-import { createRequire } from 'module'
-import { BotContext } from './BotContext.mjs'
-import { FarmingService } from '../services/FarmingService.mjs'
-import { MovementService } from '../services/MovementService.mjs'
-import { ItemPickupService } from '../services/ItemPickupService.mjs'
-import { InventoryService } from '../services/InventoryService.mjs'
-import { StorageService } from '../services/StorageService.mjs'
-
-const require = createRequire(import.meta.url)
-const { pathfinder } = require('mineflayer-pathfinder')
-
-export class BotManager {
-    constructor(config, role) {
-        this.config = config
-        this.role = role
-        this.bot = null
-        this.ctx = null
+<file path="src/services/InventoryService.mjs">
+export class InventoryService{
+    constructor(ctx) {
+        this.ctx = ctx
     }
 
-    async start() {
-        this.bot = mineflayer.createBot(this.config)
-        this.bot.loadPlugin(pathfinder)
+    getInventoryItems() {
+        return this.ctx.bot.inventory.items()
+    }
 
-        this.ctx = new BotContext({
-            bot: this.bot,
-            config: this.config,
-            role: this.role,
-        })
+    findItemByName(itemName) {
+        return this.getInventoryItems().find(item => item.name === itemName) ?? null
+    }
 
-        this.ctx.services = {
-            farming: new FarmingService(this.ctx),
-            movement: new MovementService(this.ctx),
-            pickup: new ItemPickupService(this.ctx),
-            inventory: new InventoryService(this.ctx),
-            storage: new StorageService(this.ctx),
+    countItem(itemName) {
+        return this.getInventoryItems()
+            .filter(item => item.name === itemName)
+            .reduce((total, item) => total + item.count, 0)
+    }
+
+    hasItem(itemName, minCount = 1) {
+        return this.countItem(itemName) >= minCount
+    }
+
+    getUsedSlotCount() {
+        return this.getInventoryItems().length
+    }
+
+    isInventoryNearlyFull(threshhold = 30) {
+        return this.getUsedSlotCount() >= threshhold
+    }
+
+    printInventory() {
+        const items = this.getInventoryItems()
+
+        if (items.length === 0) {
+            console.log('[inventory] inventory is empty')
+            return
         }
 
-        this.registerEvents()
-
-        this.bot.once('spawn', async () => {
-            console.log(`[${this.bot.username}] spawned`)
-            await this.role.start(this.ctx)
-        })
-    }
-
-    registerEvents() {
-        this.bot.on('login', () => {
-            console.log(`[${this.bot.username}] logged in`)
-        })
-
-        this.bot.on('messagestr', (message, messagePosition) => {
-            if (messagePosition === 'chat' && message.includes('quit')) {
-                this.bot.quit()
-            }
-        })
-
-        this.bot.on('kicked', (reason, loggedIn) => {
-            const text = typeof reason === 'string' ? reason : JSON.stringify(reason)
-
-            if (loggedIn) {
-                console.log(`[${this.bot.username}] kicked: ${text}`)
-            } else {
-                console.log(`[${this.bot.username}] kicked while connecting: ${text}`)
-            }
-        })
-
-        this.bot.on('error', (err) => {
-            console.log(`[${this.bot.username}] error: ${err.message}`)
-        })
-
-        this.bot.on('end', async () => {
-            console.log(`[${this.bot.username}] disconnected`)
-
-            try {
-                await this.role.stop()
-            } catch (err) {
-                console.error(`[${this.bot.username}] role stop error: ${err.message}`)
-            }
-        })
+        console.log('[inventory] items:')
+        for (const item of items) {
+            console.log(`- ${item.name} x${item.count}`)
+        }
     }
 }
 </file>
@@ -466,6 +263,146 @@ export class MovementService {
 }
 </file>
 
+<file path="src/services/StorageService.mjs">
+import { sleep } from "../utils/sleep.mjs"
+
+export class StorageService {
+    constructor(ctx) {
+        this.ctx = ctx
+        this.recentChests = new Map()
+    }
+
+    findNearbyChests(maxDistance = 16, maxCount = 20) {
+        const bot = this.ctx.bot
+
+        const positions = bot.findBlocks({
+            maxDistance,
+            count: 20,
+            matching: (block) => {
+                if(!block) return false
+                return block.name === 'chest'
+            }
+        })
+
+        const chests = []
+
+        for (const pos of positions) {
+            const block = bot.blockAt(pos)
+            if (!block) continue
+            if (!block.position) continue
+            if (this.isChestOnCooldown(block.position)) continue
+
+            chests.push(block)
+        }
+
+        return chests
+    }
+
+    async depositIntoChest(chestBlock, keepAmounts = {}) {
+        const bot = this.ctx.bot
+
+        await this.ctx.services.movement.goNear(chestBlock.position, 2)
+
+        let chest
+
+        try {
+            chest = await bot.openContainer(chestBlock)
+
+            const items = bot.inventory.items()
+
+            const totalCounts = {}
+            for (const item of items) {
+                totalCounts[item.name] = (totalCounts[item.name] ?? 0) + item.count
+            }
+
+            const remainingToDeposit = {}
+            for (const [itemName, total] of Object.entries(totalCounts)) {
+                const keepAmount = keepAmounts[itemName] ?? 0
+                const excess = total - keepAmount
+                remainingToDeposit[itemName] = Math.max(0, excess)
+            }
+
+            let depositedAnything = false
+
+            for (const item of items) {
+                const amountToDeposit = remainingToDeposit[item.name] ?? 0
+                if (amountToDeposit <= 0) continue
+
+                const amountToDepositNow = Math.min(item.count, amountToDeposit)
+
+                console.log(`[storage] depositing ${item.name} x${amountToDepositNow}`)
+                await chest.deposit(item.type, null, amountToDepositNow)
+
+                remainingToDeposit[item.name] -= amountToDepositNow
+                depositedAnything = true
+
+                await sleep(500)
+            }
+
+            if (!depositedAnything) {
+                console.log('[storage] nothing needed to be deposited')
+            } else {
+                console.log('[storage] nothing needed to be deposited')
+            }
+
+            return true
+        } catch (err) {
+            console.log(`[storage] chest at ${chestBlock.position.x},${chestBlock.position.y},${chestBlock.position.z} failed: ${err.message}`)
+            this.markChestCooldown(chestBlock.position, 30000)
+            return false
+        } finally {
+            if (chest) chest.close()
+        }
+    }
+
+    async depositExcessItems(keepAmounts = {}) {
+        const chests = this.findNearbyChests()
+
+        if (chests.length === 0) {
+            console.log('[storage] no usable chests found nearby')
+            return false
+        }
+
+        for (const chestBlock of chests) {
+            const success = await this.depositIntoChest(chestBlock, keepAmounts)
+            if (success) {
+                return true
+            }
+        }
+
+        console.log('[storage] no usable chests found nearby')
+        return false
+    }
+
+    getChestKey(position) {
+        if (!position) return null
+        return `${position.x},${position.y},${position.z}`
+    }
+
+    isChestOnCooldown(position) {
+        const key = this.getChestKey(position)
+        if (!key) return false
+
+        const until = this.recentChests.get(key)
+        if (!until) return false
+
+        if (Date.now() > until) {
+            this.recentChests.delete(key)
+            return false
+        }
+
+        return true
+    }
+
+    markChestCooldown(position, ms = 5000) {
+        const key = this.getChestKey(position)
+        if (!key) return
+
+        this.recentChests.set(key, Date.now() + ms)
+    }
+}
+</file>
+
 <file path="src/utils/sleep.mjs">
 export function sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms))
@@ -484,6 +421,91 @@ ACCOUNT.json
     "mineflayer": "^4.37.0",
     "mineflayer-pathfinder": "^2.4.5"
   }
+}
+</file>
+
+<file path="src/core/BotManager.mjs">
+import mineflayer from 'mineflayer'
+import { createRequire } from 'module'
+import { BotContext } from './BotContext.mjs'
+import { FarmingService } from '../services/FarmingService.mjs'
+import { MovementService } from '../services/MovementService.mjs'
+import { ItemPickupService } from '../services/ItemPickupService.mjs'
+import { InventoryService } from '../services/InventoryService.mjs'
+import { StorageService } from '../services/StorageService.mjs'
+
+const require = createRequire(import.meta.url)
+const { pathfinder } = require('mineflayer-pathfinder')
+
+export class BotManager {
+    constructor(config, role) {
+        this.config = config
+        this.role = role
+        this.bot = null
+        this.ctx = null
+    }
+
+    async start() {
+        this.bot = mineflayer.createBot(this.config)
+        this.bot.loadPlugin(pathfinder)
+
+        this.ctx = new BotContext({
+            bot: this.bot,
+            config: this.config,
+            role: this.role,
+        })
+
+        this.ctx.services = {
+            farming: new FarmingService(this.ctx),
+            movement: new MovementService(this.ctx),
+            pickup: new ItemPickupService(this.ctx),
+            inventory: new InventoryService(this.ctx),
+            storage: new StorageService(this.ctx),
+        }
+
+        this.registerEvents()
+
+        this.bot.once('spawn', async () => {
+            console.log(`[${this.bot.username}] spawned`)
+            await this.role.start(this.ctx)
+        })
+    }
+
+    registerEvents() {
+        this.bot.on('login', () => {
+            console.log(`[${this.bot.username}] logged in`)
+        })
+
+        this.bot.on('messagestr', (message, messagePosition) => {
+            if (messagePosition === 'chat' && message.includes('quit')) {
+                this.bot.quit()
+            }
+        })
+
+        this.bot.on('kicked', (reason, loggedIn) => {
+            const text = typeof reason === 'string' ? reason : JSON.stringify(reason)
+
+            if (loggedIn) {
+                console.log(`[${this.bot.username}] kicked: ${text}`)
+            } else {
+                console.log(`[${this.bot.username}] kicked while connecting: ${text}`)
+            }
+        })
+
+        this.bot.on('error', (err) => {
+            console.log(`[${this.bot.username}] error: ${err.message}`)
+        })
+
+        this.bot.on('end', async () => {
+            console.log(`[${this.bot.username}] disconnected`)
+
+            try {
+                await this.role.stop()
+            } catch (err) {
+                console.error(`[${this.bot.username}] role stop error: ${err.message}`)
+            }
+        })
+    }
 }
 </file>
 

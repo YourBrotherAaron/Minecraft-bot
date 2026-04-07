@@ -6,7 +6,7 @@ export class StorageService {
         this.recentChests = new Map()
     }
 
-    findNearestChest(maxDistance = 16) {
+    findNearbyChests(maxDistance = 16, maxCount = 20) {
         const bot = this.ctx.bot
 
         const positions = bot.findBlocks({
@@ -18,50 +18,45 @@ export class StorageService {
             }
         })
 
+        const chests = []
+
         for (const pos of positions) {
             const block = bot.blockAt(pos)
             if (!block) continue
             if (!block.position) continue
             if (this.isChestOnCooldown(block.position)) continue
 
-            return block
+            chests.push(block)
         }
 
-        return null
+        return chests
     }
 
-    async depositExcessItems(keepAmounts = {}) {
+    async depositIntoChest(chestBlock, keepAmounts = {}) {
         const bot = this.ctx.bot
-        const chestBlock = this.findNearestChest()
-
-        if (!chestBlock) {
-            console.log('[storage] no chest found nearby')
-            return false
-        }
 
         await this.ctx.services.movement.goNear(chestBlock.position, 2)
 
         let chest
 
-        
         try {
             chest = await bot.openContainer(chestBlock)
-            
+
             const items = bot.inventory.items()
 
-            // Total counts per item name
             const totalCounts = {}
             for (const item of items) {
                 totalCounts[item.name] = (totalCounts[item.name] ?? 0) + item.count
             }
 
-            // how many of each item needs to be deposited
             const remainingToDeposit = {}
             for (const [itemName, total] of Object.entries(totalCounts)) {
                 const keepAmount = keepAmounts[itemName] ?? 0
                 const excess = total - keepAmount
                 remainingToDeposit[itemName] = Math.max(0, excess)
             }
+
+            let depositedAnything = false
 
             for (const item of items) {
                 const amountToDeposit = remainingToDeposit[item.name] ?? 0
@@ -71,19 +66,46 @@ export class StorageService {
 
                 console.log(`[storage] depositing ${item.name} x${amountToDepositNow}`)
                 await chest.deposit(item.type, null, amountToDepositNow)
+
                 remainingToDeposit[item.name] -= amountToDepositNow
+                depositedAnything = true
+
                 await sleep(500)
             }
 
-            console.log('[storage] deposited items into chest')
+            if (!depositedAnything) {
+                console.log('[storage] nothing needed to be deposited')
+            } else {
+                console.log('[storage] nothing needed to be deposited')
+            }
+
             return true
-        } catch(err) {
-            console.log(`[storage] deposit failed: ${err.message}`)
+        } catch (err) {
+            console.log(`[storage] chest at ${chestBlock.position.x},${chestBlock.position.y},${chestBlock.position.z} failed: ${err.message}`)
             this.markChestCooldown(chestBlock.position, 30000)
             return false
         } finally {
             if (chest) chest.close()
         }
+    }
+
+    async depositExcessItems(keepAmounts = {}) {
+        const chests = this.findNearbyChests()
+
+        if (chests.length === 0) {
+            console.log('[storage] no usable chests found nearby')
+            return false
+        }
+
+        for (const chestBlock of chests) {
+            const success = await this.depositIntoChest(chestBlock, keepAmounts)
+            if (success) {
+                return true
+            }
+        }
+
+        console.log('[storage] no usable chests found nearby')
+        return false
     }
 
     getChestKey(position) {
