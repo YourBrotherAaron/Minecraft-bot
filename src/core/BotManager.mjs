@@ -4,6 +4,8 @@ import { BotContext } from './BotContext.mjs'
 import { FarmingService } from '../services/FarmingService.mjs'
 import { MovementService } from '../services/MovementService.mjs'
 import { ItemPickupService } from '../services/ItemPickupService.mjs'
+import { InventoryService } from '../services/InventoryService.mjs'
+import { StorageService } from '../services/StorageService.mjs'
 
 const require = createRequire(import.meta.url)
 const { pathfinder } = require('mineflayer-pathfinder')
@@ -30,6 +32,8 @@ export class BotManager {
             farming: new FarmingService(this.ctx),
             movement: new MovementService(this.ctx),
             pickup: new ItemPickupService(this.ctx),
+            inventory: new InventoryService(this.ctx),
+            storage: new StorageService(this.ctx),
         }
 
         this.registerEvents()

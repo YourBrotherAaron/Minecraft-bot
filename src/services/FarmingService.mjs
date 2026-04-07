@@ -41,7 +41,23 @@ export class FarmingService {
             await sleep(800)
             await this.ctx.services.pickup.collectAllNearby(8, 5)
             
-            await this.replantCrop(pos, cropName)
+            const replanted = await this.replantCrop(pos, cropName)
+            if (!replanted) {
+                this.markTargetCooldown(pos, 4000)
+            }
+
+            if (this.ctx.services.inventory.isInventoryNearlyFull()) {
+                console.log(`[farming] inventory is getting full`)
+
+                await this.ctx.services.storage.depositExcessItems({
+                    wheat_seeds: 32,
+                    beetroot_seeds: 32,
+                    carrot: 32,
+                    potato: 32,
+                    nether_wart: 32
+                })
+            }
+
         } catch (err) {
             console.error(`[farming] runFarmingCycle error: ${err.message}`)
 
@@ -163,37 +179,42 @@ export class FarmingService {
 
         if (!targetBlock || targetBlock.name !== 'air') {
             console.log('[farming] cannot replant, target block is not empty')
-            return
+            return false
         }
 
-        // Check soil
         const requiredSoil = this.getRequiredSoilForCrop(cropName)
         if (!requiredSoil) {
             console.log(`[farming] no soil mapping for crop ${cropName}`)
-            return
+            return false
         }
 
         if (!blockBelow || blockBelow.name !== requiredSoil) {
             console.log(`[farming] cannot replant, block below is not ${requiredSoil}`)
-            return
+            return false
         }
 
-        // Check seed
         const seedItemName = this.getSeedItemNameForCrop(cropName)
         if (!seedItemName) {
             console.log(`[farming] no seed mapping for crop ${cropName}`)
-            return
+            return false
         }
 
-        const seedItem = bot.inventory.items().find(item => item.name === seedItemName)
+        const seedItem = this.ctx.services.inventory.findItemByName(seedItemName)
         if (!seedItem) {
             console.log(`[farming] no ${seedItemName} in inventory`)
-            return
+            return false
         }
 
-        await bot.equip(seedItem, 'hand')
-        await bot.placeBlock(blockBelow, new Vec3(0, 1, 0))
-        console.log(`[farming] replanted ${cropName}`)
+        try {
+            await bot.equip(seedItem, 'hand')
+            await bot.placeBlock(blockBelow, new Vec3(0, 1, 0))
+
+            console.log(`[farming] replanted ${cropName}`)
+            return true
+        } catch (err) {
+            console.log(`[farming] failed to replant ${cropName}: ${err.message}`)
+            return false
+        }
     }
 
     getSeedItemNameForCrop(cropName) {

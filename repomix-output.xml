@@ -49,13 +49,181 @@ src/core/BotContext.mjs
 src/core/BotManager.mjs
 src/roles/FarmerRole.mjs
 src/services/FarmingService.mjs
+src/services/InventoryService.mjs
 src/services/ItemPickupService.mjs
 src/services/MovementService.mjs
+src/services/StorageService.mjs
 src/utils/sleep.mjs
 </directory_structure>
 
 <files>
 This section contains the contents of the repository's files.
+
+<file path="src/services/InventoryService.mjs">
+export class InventoryService{
+    constructor(ctx) {
+        this.ctx = ctx
+    }
+
+    getInventoryItems() {
+        return this.ctx.bot.inventory.items()
+    }
+
+    findItemByName(itemName) {
+        return this.getInventoryItems().find(item => item.name === itemName) ?? null
+    }
+
+    countItem(itemName) {
+        return this.getInventoryItems()
+            .filter(item => item.name === itemName)
+            .reduce((total, item) => total + item.count, 0)
+    }
+
+    hasItem(itemName, minCount = 1) {
+        return this.countItem(itemName) >= minCount
+    }
+
+    getUsedSlotCount() {
+        return this.getInventoryItems().length
+    }
+
+    isInventoryNearlyFull(threshhold = 30) {
+        return this.getUsedSlotCount() >= threshhold
+    }
+
+    printInventory() {
+        const items = this.getInventoryItems()
+
+        if (items.length === 0) {
+            console.log('[inventory] inventory is empty')
+            return
+        }
+
+        console.log('[inventory] items:')
+        for (const item of items) {
+            console.log(`- ${item.name} x${item.count}`)
+        }
+    }
+}
+</file>
+
+<file path="src/services/StorageService.mjs">
+import { sleep } from "../utils/sleep.mjs"
+
+export class StorageService {
+    constructor(ctx) {
+        this.ctx = ctx
+        this.recentChests = new Map()
+    }
+
+    findNearestChest(maxDistance = 16) {
+        const bot = this.ctx.bot
+
+        const positions = bot.findBlocks({
+            maxDistance,
+            count: 20,
+            matching: (block) => {
+                if(!block) return false
+                return block.name === 'chest'
+            }
+        })
+
+        for (const pos of positions) {
+            const block = bot.blockAt(pos)
+            if (!block) continue
+            if (!block.position) continue
+            if (this.isChestOnCooldown(block.position)) continue
+
+            return block
+        }
+
+        return null
+    }
+
+    async depositExcessItems(keepAmmounts = {}) {
+        const bot = this.ctx.bot
+        const chestBlock = this.findNearestChest()
+
+        if (!chestBlock) {
+            console.log('[storage] no chest found nearby')
+            return false
+        }
+
+        await this.ctx.services.movement.goNear(chestBlock.position, 2)
+
+        let chest
+
+        
+        try {
+            chest = await bot.openContainer(chestBlock)
+            
+            const items = bot.inventory.items()
+
+            // Total counts per item name
+            const totalCounts = {}
+            for (const item of items) {
+                totalCounts[item.name] = (totalCounts[item.name] ?? 0) + item.count
+            }
+
+            // how many of each item needs to be deposited
+            const remainingToDeposit = {}
+            for (const [itemName, total] of Object.entries(totalCounts)) {
+                const keepAmmount = keepAmmounts[itemName] ?? 0
+                const excess = total - keepAmmount
+                remainingToDeposit[itemName] = Math.max(0, excess)
+            }
+
+            for (const item of items) {
+                const ammountToDeposit = remainingToDeposit[item.name] ?? 0
+                if (ammountToDeposit <= 0) continue
+
+                const ammountToDepositNow = Math.min(item.count, ammountToDeposit)
+
+                console.log(`[storage] depositing ${item.name} x${ammountToDepositNow}`)
+                await chest.deposit(item.type, null, ammountToDepositNow)
+                remainingToDeposit[item.name] -= ammountToDepositNow
+                await sleep(500)
+            }
+
+            console.log('[storage] deposited items into chest')
+            return true
+        } catch(err) {
+            console.log(`[storage] deposit failed: ${err.message}`)
+            this.markChestCooldown(chestBlock.position, 30000)
+            return false
+        } finally {
+            chest.close()
+        }
+    }
+
+    getChestKey(position) {
+        if (!position) return null
+        return `${position.x},${position.y},${position.z}`
+    }
+
+    isChestOnCooldown(position) {
+        const key = this.getChestKey(position)
+        if (!key) return false
+
+        const until = this.recentChests.get(key)
+        if (!until) return false
+
+        if (Date.now() > until) {
+            this.recentChests.delete(key)
+            return false
+        }
+
+        return true
+    }
+
+    markChestCooldown(position, ms = 5000) {
+        const key = this.getChestKey(position)
+        if (!key) return
+
+        this.recentChests.set(key, Date.now() + ms)
+    }
+}
+</file>
 
 <file path="index.mjs">
 import { botConfig } from './src/config/botConfig.mjs'
@@ -120,6 +288,8 @@ import { BotContext } from './BotContext.mjs'
 import { FarmingService } from '../services/FarmingService.mjs'
 import { MovementService } from '../services/MovementService.mjs'
 import { ItemPickupService } from '../services/ItemPickupService.mjs'
+import { InventoryService } from '../services/InventoryService.mjs'
+import { StorageService } from '../services/StorageService.mjs'
 
 const require = createRequire(import.meta.url)
 const { pathfinder } = require('mineflayer-pathfinder')
@@ -146,6 +316,8 @@ export class BotManager {
             farming: new FarmingService(this.ctx),
             movement: new MovementService(this.ctx),
             pickup: new ItemPickupService(this.ctx),
+            inventory: new InventoryService(this.ctx),
+            storage: new StorageService(this.ctx),
         }
 
         this.registerEvents()
@@ -190,265 +362,6 @@ export class BotManager {
                 console.error(`[${this.bot.username}] role stop error: ${err.message}`)
             }
         })
-    }
-}
-</file>
-
-<file path="src/roles/FarmerRole.mjs">
-import { BaseRole } from '../core/BaseRole.mjs'
-import { sleep } from '../utils/sleep.mjs'
-
-export class FarmerRole extends BaseRole {
-    constructor() {
-        super('farmer')
-    }
-
-    async start(ctx) {
-        await super.start(ctx)
-        ctx.bot.chat('Farmer bot online')
-
-        try {
-            while (this.active && ctx.bot && ctx.bot.entity) {
-                await ctx.services.farming.runFarmingCycle()
-                await sleep(800)
-            }
-        } catch (err) {
-            if (this.active) {
-                console.error(`[${this.name}] loop error: ${err.message}`)
-            }
-        }
-
-    }
-}
-</file>
-
-<file path="src/services/FarmingService.mjs">
-import  { Vec3 } from 'vec3'
-import { sleep } from '../utils/sleep.mjs'
-
-export class FarmingService {
-    constructor(ctx) {
-        this.ctx = ctx
-        this.busy = false
-        this.recentTargets = new Map()
-    }
-
-    async runFarmingCycle() {
-        if (this.busy) return
-        this.busy = true
-
-        let crop = null
-
-        try {
-            crop = await this.findHarvestableCrop()
-
-            if (!crop) {
-                console.log('[farming] no harvestable crop found')
-                return
-            }
-            
-            const pos = crop.position
-
-            await this.ctx.services.movement.goNear(pos, 2)
-            const freshCrop = this.ctx.bot.blockAt(pos)
-
-            if (!this.isHarvestableCrop(freshCrop)) {
-                console.log('[farming] crop is no longer harvestable')
-                this.markTargetCooldown(pos, 3000)
-                return
-            }
-
-            const cropName = freshCrop.name
-
-            await this.harvestCrop(freshCrop) 
-
-            // wait a moment for drops to appear
-            await sleep(800)
-            await this.ctx.services.pickup.collectAllNearby(8, 5)
-            
-            await this.replantCrop(pos, cropName)
-        } catch (err) {
-            console.error(`[farming] runOnce error: ${err.message}`)
-
-            if (crop?.position) {
-                this.markTargetCooldown(crop.position, 5000)
-            }
-        } finally {
-            this.busy = false
-        }
-    }
-
-    async harvestCrop(block) {
-        if (!block) return
-
-        console.log(`[farming] harvesting ${block.name}`)
-        await this.ctx.bot.dig(block)
-        console.log('[farming] harvest complete')
-    }
-
-    async findHarvestableCrop() {
-        const bot = this.ctx.bot
-
-        const positions = bot.findBlocks({
-            maxDistance: 16,
-            count: 20,
-            matching: (block) => this.isHarvestableCrop(block)
-        })
-
-        for (const pos of positions) {
-            const block = bot.blockAt(pos)
-            if (!block) continue
-            if (!block.position) continue
-            if (this.isOnCooldown(block.position)) continue
-
-            return block
-        }
-
-        return null
-    }
-
-    isHarvestableCrop(block) {
-        if (!block) return false
-
-        const rawAge = block.getProperties?.()?.age
-        const age = rawAge == null ? null : Number(rawAge)
-
-        if (
-            block.name === 'wheat' ||
-            block.name === 'carrots' ||
-            block.name === 'potatoes' ||
-            block.name === 'beetroots'
-        ) {
-            return this.isMatureByAge(block.name, age)
-        }
-
-        if (block.name === 'nether_wart') {
-            return age === 3
-        }
-
-        return false
-    }
-
-    isMatureByAge(blockName, age) {
-        if (typeof age !== 'number' || Number.isNaN(age)) return false
-
-        switch (blockName) {
-            case 'wheat':
-            case 'carrots':
-            case 'potatoes':
-                return age === 7
-            case 'beetroots':
-                return age === 3
-            default:
-                return false
-        }
-    }
-
-    // Helper to convert position into string for key > value Map
-    getTargetKey(position) {
-        if (!position) return null
-        return `${position.x},${position.y},${position.z}`
-    }
-
-    // Checks if target crop is on cooldown
-    isOnCooldown(position) {
-        const key = this.getTargetKey(position)
-        if (!key) return false
-
-        const until = this.recentTargets.get(key)
-        if (!until) return false
-
-        if (Date.now() > until) {
-            this.recentTargets.delete(key)
-            return false
-        }
-
-        return true
-    }
-
-    // Temporarily mark failed crop targets so the bot does not keep retrying
-    // the same unreachable plant every loop.
-    // Flow:
-    // 1. Bot selects a crop
-    // 2. Bot walks to it
-    // 3. Bot tries to harvest it
-    // 4. Harvest fails or the crop cannot be reached
-    // 5. Bot skips that crop for a short time and tries another one
-    // 6. After the cooldown expires, the crop can be targeted again
-    markTargetCooldown(position, ms = 5000) {
-        const key = this.getTargetKey(position)
-        this.recentTargets.set(key, Date.now() + ms)
-    }
-
-    async replantCrop(position, cropName) {
-        const bot = this.ctx.bot
-
-        const targetBlock = bot.blockAt(position)
-        const blockBelow = bot.blockAt(position.offset(0, -1, 0))
-
-        if (!targetBlock || targetBlock.name !== 'air') {
-            console.log('[farming] cannot replant, target block is not empty')
-            return
-        }
-
-        // Check soil
-        const requiredSoil = this.getRequiredSoilForCrop(cropName)
-        if (!requiredSoil) {
-            console.log(`[farming] no soil mapping for crop ${cropName}`)
-            return
-        }
-
-        if (!blockBelow || blockBelow.name !== requiredSoil) {
-            console.log(`[farming] cannot replant, block below is not ${requiredSoil}`)
-            return
-        }
-
-        // Check seed
-        const seedItemName = this.getSeedItemNameForCrop(cropName)
-        if (!seedItemName) {
-            console.log(`[farming] no seed mapping for crop ${cropName}`)
-            return
-        }
-
-        const seedItem = bot.inventory.items().find(item => item.name === seedItemName)
-        if (!seedItem) {
-            console.log(`[farming] no ${seedItemName} in inventory`)
-            return
-        }
-
-        await bot.equip(seedItem, 'hand')
-        await bot.placeBlock(blockBelow, new Vec3(0, 1, 0))
-    }
-
-    getSeedItemNameForCrop(cropName) {
-        switch (cropName) {
-            case 'wheat':
-                return 'wheat_seeds'
-            case 'carrots':
-                return 'carrot'
-            case 'potatoes':
-                return 'potato'
-            case 'beetroots':
-                return 'beetroot_seeds'
-            case 'nether_wart':
-                return 'nether_wart'
-            default:
-                return null
-        }
-    }
-
-    getRequiredSoilForCrop(cropName) {
-        switch (cropName) {
-            case 'wheat':
-            case 'carrots':
-            case 'potatoes':
-            case 'beetroots':
-                return 'farmland'
-            case 'nether_wart':
-                return 'soul_sand'
-            default:
-                return null
-        }
     }
 }
 </file>
@@ -571,6 +484,287 @@ ACCOUNT.json
     "mineflayer": "^4.37.0",
     "mineflayer-pathfinder": "^2.4.5"
   }
+}
+</file>
+
+<file path="src/roles/FarmerRole.mjs">
+import { BaseRole } from '../core/BaseRole.mjs'
+import { sleep } from '../utils/sleep.mjs'
+
+export class FarmerRole extends BaseRole {
+    constructor() {
+        super('farmer')
+    }
+
+    async start(ctx) {
+        await super.start(ctx)
+        ctx.bot.chat('Farmer bot online')
+
+        try {
+            while (this.active && ctx.bot && ctx.bot.entity) {
+                await ctx.services.farming.runFarmingCycle()
+                await sleep(800)
+            }
+        } catch (err) {
+            if (this.active) {
+                console.error(`[${this.name}] loop error: ${err.message}`)
+            }
+        }
+
+    }
+}
+</file>
+
+<file path="src/services/FarmingService.mjs">
+import  { Vec3 } from 'vec3'
+import { sleep } from '../utils/sleep.mjs'
+
+export class FarmingService {
+    constructor(ctx) {
+        this.ctx = ctx
+        this.busy = false
+        this.recentTargets = new Map()
+    }
+
+    async runFarmingCycle() {
+        if (this.busy) return
+        this.busy = true
+
+        let crop = null
+
+        try {
+            crop = await this.findHarvestableCrop()
+
+            if (!crop) {
+                console.log('[farming] no harvestable crop found')
+                return
+            }
+            
+            const pos = crop.position
+
+            await this.ctx.services.movement.goNear(pos, 2)
+            const freshCrop = this.ctx.bot.blockAt(pos)
+
+            if (!this.isHarvestableCrop(freshCrop)) {
+                console.log('[farming] crop is no longer harvestable')
+                this.markTargetCooldown(pos, 3000)
+                return
+            }
+
+            const cropName = freshCrop.name
+
+            await this.harvestCrop(freshCrop) 
+
+            // wait a moment for drops to appear
+            await sleep(800)
+            await this.ctx.services.pickup.collectAllNearby(8, 5)
+            
+            const replanted = await this.replantCrop(pos, cropName)
+            if (!replanted) {
+                this.markTargetCooldown(pos, 4000)
+            }
+
+            if (this.ctx.services.inventory.isInventoryNearlyFull()) {
+                console.log(`[farming] inventory is getting full`)
+
+                await this.ctx.services.storage.depositExcessItems({
+                    wheat_seeds: 32,
+                    beetroot_seeds: 32,
+                    carrot: 32,
+                    potato: 32,
+                    nether_wart: 32
+                })
+            }
+
+        } catch (err) {
+            console.error(`[farming] runFarmingCycle error: ${err.message}`)
+
+            if (crop?.position) {
+                this.markTargetCooldown(crop.position, 5000)
+            }
+        } finally {
+            this.busy = false
+        }
+    }
+
+    async harvestCrop(block) {
+        if (!block) return
+
+        console.log(`[farming] harvesting ${block.name}`)
+        await this.ctx.bot.dig(block)
+        console.log('[farming] harvest complete')
+    }
+
+    async findHarvestableCrop() {
+        const bot = this.ctx.bot
+
+        const positions = bot.findBlocks({
+            maxDistance: 16,
+            count: 20,
+            matching: (block) => this.isHarvestableCrop(block)
+        })
+
+        for (const pos of positions) {
+            const block = bot.blockAt(pos)
+            if (!block) continue
+            if (!block.position) continue
+            if (this.isOnCooldown(block.position)) continue
+
+            return block
+        }
+
+        return null
+    }
+
+    isHarvestableCrop(block) {
+        if (!block) return false
+
+        const rawAge = block.getProperties?.()?.age
+        const age = rawAge == null ? null : Number(rawAge)
+
+        if (
+            block.name === 'wheat' ||
+            block.name === 'carrots' ||
+            block.name === 'potatoes' ||
+            block.name === 'beetroots'
+        ) {
+            return this.isMatureByAge(block.name, age)
+        }
+
+        if (block.name === 'nether_wart') {
+            return age === 3
+        }
+
+        return false
+    }
+
+    isMatureByAge(blockName, age) {
+        if (typeof age !== 'number' || Number.isNaN(age)) return false
+
+        switch (blockName) {
+            case 'wheat':
+            case 'carrots':
+            case 'potatoes':
+                return age === 7
+            case 'beetroots':
+                return age === 3
+            default:
+                return false
+        }
+    }
+
+    // Helper to convert position into string for key > value Map
+    getTargetKey(position) {
+        if (!position) return null
+        return `${position.x},${position.y},${position.z}`
+    }
+
+    // Checks if target crop is on cooldown
+    isOnCooldown(position) {
+        const key = this.getTargetKey(position)
+        if (!key) return false
+
+        const until = this.recentTargets.get(key)
+        if (!until) return false
+
+        if (Date.now() > until) {
+            this.recentTargets.delete(key)
+            return false
+        }
+
+        return true
+    }
+
+    // Temporarily mark failed crop targets so the bot does not keep retrying
+    // the same unreachable plant every loop.
+    // Flow:
+    // 1. Bot selects a crop
+    // 2. Bot walks to it
+    // 3. Bot tries to harvest it
+    // 4. Harvest fails or the crop cannot be reached
+    // 5. Bot skips that crop for a short time and tries another one
+    // 6. After the cooldown expires, the crop can be targeted again
+    markTargetCooldown(position, ms = 5000) {
+        const key = this.getTargetKey(position)
+        this.recentTargets.set(key, Date.now() + ms)
+    }
+
+    async replantCrop(position, cropName) {
+        const bot = this.ctx.bot
+
+        const targetBlock = bot.blockAt(position)
+        const blockBelow = bot.blockAt(position.offset(0, -1, 0))
+
+        if (!targetBlock || targetBlock.name !== 'air') {
+            console.log('[farming] cannot replant, target block is not empty')
+            return false
+        }
+
+        const requiredSoil = this.getRequiredSoilForCrop(cropName)
+        if (!requiredSoil) {
+            console.log(`[farming] no soil mapping for crop ${cropName}`)
+            return false
+        }
+
+        if (!blockBelow || blockBelow.name !== requiredSoil) {
+            console.log(`[farming] cannot replant, block below is not ${requiredSoil}`)
+            return false
+        }
+
+        const seedItemName = this.getSeedItemNameForCrop(cropName)
+        if (!seedItemName) {
+            console.log(`[farming] no seed mapping for crop ${cropName}`)
+            return false
+        }
+
+        const seedItem = this.ctx.services.inventory.findItemByName(seedItemName)
+        if (!seedItem) {
+            console.log(`[farming] no ${seedItemName} in inventory`)
+            return false
+        }
+
+        try {
+            await bot.equip(seedItem, 'hand')
+            await bot.placeBlock(blockBelow, new Vec3(0, 1, 0))
+
+            console.log(`[farming] replanted ${cropName}`)
+            return true
+        } catch (err) {
+            console.log(`[farming] failed to replant ${cropName}: ${err.message}`)
+            return false
+        }
+    }
+
+    getSeedItemNameForCrop(cropName) {
+        switch (cropName) {
+            case 'wheat':
+                return 'wheat_seeds'
+            case 'carrots':
+                return 'carrot'
+            case 'potatoes':
+                return 'potato'
+            case 'beetroots':
+                return 'beetroot_seeds'
+            case 'nether_wart':
+                return 'nether_wart'
+            default:
+                return null
+        }
+    }
+
+    getRequiredSoilForCrop(cropName) {
+        switch (cropName) {
+            case 'wheat':
+            case 'carrots':
+            case 'potatoes':
+            case 'beetroots':
+                return 'farmland'
+            case 'nether_wart':
+                return 'soul_sand'
+            default:
+                return null
+        }
+    }
 }
 </file>
 
