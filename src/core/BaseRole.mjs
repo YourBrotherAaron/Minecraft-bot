@@ -1,3 +1,5 @@
+import { sleep } from "../utils/sleep.mjs"
+
 export class BaseRole {
     constructor(name = 'base') {
         this.name = name
@@ -9,6 +11,7 @@ export class BaseRole {
         this.ctx = ctx
         this.active = true
         console.log(`[role:${this.name}] started`)
+        await sleep(5000)
     }
 
     async stop() {

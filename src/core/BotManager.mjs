@@ -2,6 +2,7 @@ import mineflayer from 'mineflayer'
 import { createRequire } from 'module'
 import { BotContext } from './BotContext.mjs'
 import { FarmingService } from '../services/FarmingService.mjs'
+import { FishingService } from '../services/FishingService.mjs'
 import { MovementService } from '../services/MovementService.mjs'
 import { ItemPickupService } from '../services/ItemPickupService.mjs'
 import { InventoryService } from '../services/InventoryService.mjs'
@@ -30,6 +31,7 @@ export class BotManager {
 
         this.ctx.services = {
             farming: new FarmingService(this.ctx),
+            fishing: new FishingService(this.ctx),
             movement: new MovementService(this.ctx),
             pickup: new ItemPickupService(this.ctx),
             inventory: new InventoryService(this.ctx),
