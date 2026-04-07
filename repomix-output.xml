@@ -1,0 +1,571 @@
+This file is a merged representation of the entire codebase, combined into a single document by Repomix.
+
+<file_summary>
+This section contains a summary of this file.
+
+<purpose>
+This file contains a packed representation of the entire repository's contents.
+It is designed to be easily consumable by AI systems for analysis, code review,
+or other automated processes.
+</purpose>
+
+<file_format>
+The content is organized as follows:
+1. This summary section
+2. Repository information
+3. Directory structure
+4. Repository files (if enabled)
+5. Multiple file entries, each consisting of:
+  - File path as an attribute
+  - Full contents of the file
+</file_format>
+
+<usage_guidelines>
+- This file should be treated as read-only. Any changes should be made to the
+  original repository files, not this packed version.
+- When processing this file, use the file path to distinguish
+  between different files in the repository.
+- Be aware that this file may contain sensitive information. Handle it with
+  the same level of security as you would the original repository.
+</usage_guidelines>
+
+<notes>
+- Some files may have been excluded based on .gitignore rules and Repomix's configuration
+- Binary files are not included in this packed representation. Please refer to the Repository Structure section for a complete list of file paths, including binary files
+- Files matching patterns in .gitignore are excluded
+- Files matching default ignore patterns are excluded
+- Files are sorted by Git change count (files with more changes are at the bottom)
+</notes>
+
+</file_summary>
+
+<directory_structure>
+.gitignore
+index.mjs
+package.json
+src/config/botConfig.mjs
+src/core/BaseRole.mjs
+src/core/BotContext.mjs
+src/core/BotManager.mjs
+src/roles/FarmerRole.mjs
+src/services/FarmingService.mjs
+src/services/ItemPickupService.mjs
+src/services/MovementService.mjs
+src/utils/sleep.mjs
+</directory_structure>
+
+<files>
+This section contains the contents of the repository's files.
+
+<file path="index.mjs">
+import { botConfig } from './src/config/botConfig.mjs'
+import { BotManager } from './src/core/BotManager.mjs'
+import { BaseRole } from './src/core/BaseRole.mjs'
+import { FarmerRole } from './src/roles/FarmerRole.mjs'
+
+// const role = new BaseRole('idle')
+const role = new FarmerRole()
+const manager = new BotManager(botConfig, role)
+
+await manager.start()
+</file>
+
+<file path="src/config/botConfig.mjs">
+export const botConfig = {
+    host: 'localhost',
+    port: 3030,
+    version: '1.21.11',
+    username: 'TestBot'
+}
+</file>
+
+<file path="src/core/BaseRole.mjs">
+export class BaseRole {
+    constructor(name = 'base') {
+        this.name = name
+        this.ctx = null
+        this.active = false
+    }
+
+    async start(ctx) {
+        this.ctx = ctx
+        this.active = true
+        console.log(`[role:${this.name}] started`)
+    }
+
+    async stop() {
+        this.active = false
+        console.log(`[role:${this.name}] stopped`)
+    }
+}
+</file>
+
+<file path="src/core/BotContext.mjs">
+export class BotContext {
+    constructor({ bot, config, role }) {
+        this.bot = bot
+        this.config = config
+        this.role = role
+
+        this.services = {}
+        this.eventBus = null
+    }
+}
+</file>
+
+<file path="src/core/BotManager.mjs">
+import mineflayer from 'mineflayer'
+import { createRequire } from 'module'
+import { BotContext } from './BotContext.mjs'
+import { FarmingService } from '../services/FarmingService.mjs'
+import { MovementService } from '../services/MovementService.mjs'
+import { ItemPickupService } from '../services/ItemPickupService.mjs'
+
+const require = createRequire(import.meta.url)
+const { pathfinder } = require('mineflayer-pathfinder')
+
+export class BotManager {
+    constructor(config, role) {
+        this.config = config
+        this.role = role
+        this.bot = null
+        this.ctx = null
+    }
+
+    async start() {
+        this.bot = mineflayer.createBot(this.config)
+        this.bot.loadPlugin(pathfinder)
+
+        this.ctx = new BotContext({
+            bot: this.bot,
+            config: this.config,
+            role: this.role,
+        })
+
+        this.ctx.services = {
+            farming: new FarmingService(this.ctx),
+            movement: new MovementService(this.ctx),
+            pickup: new ItemPickupService(this.ctx),
+        }
+
+        this.registerEvents()
+
+        this.bot.once('spawn', async () => {
+            console.log(`[${this.bot.username}] spawned`)
+            await this.role.start(this.ctx)
+        })
+    }
+
+    registerEvents() {
+        this.bot.on('login', () => {
+            console.log(`[${this.bot.username}] logged in`)
+        })
+
+        this.bot.on('messagestr', (message, messagePosition) => {
+            if (messagePosition === 'chat' && message.includes('quit')) {
+                this.bot.quit()
+            }
+        })
+
+        this.bot.on('kicked', (reason, loggedIn) => {
+            const text = typeof reason === 'string' ? reason : JSON.stringify(reason)
+
+            if (loggedIn) {
+                console.log(`[${this.bot.username}] kicked: ${text}`)
+            } else {
+                console.log(`[${this.bot.username}] kicked while connecting: ${text}`)
+            }
+        })
+
+        this.bot.on('error', (err) => {
+            console.log(`[${this.bot.username}] error: ${err.message}`)
+        })
+
+        this.bot.on('end', async () => {
+            console.log(`[${this.bot.username}] disconnected`)
+
+            try {
+                await this.role.stop()
+            } catch (err) {
+                console.error(`[${this.bot.username}] role stop error: ${err.message}`)
+            }
+        })
+    }
+}
+</file>
+
+<file path="src/roles/FarmerRole.mjs">
+import { BaseRole } from '../core/BaseRole.mjs'
+import { sleep } from '../utils/sleep.mjs'
+
+export class FarmerRole extends BaseRole {
+    constructor() {
+        super('farmer')
+    }
+
+    async start(ctx) {
+        await super.start(ctx)
+        ctx.bot.chat('Farmer bot online')
+
+        try {
+            while (this.active && ctx.bot && ctx.bot.entity) {
+                await ctx.services.farming.runOnce()
+                await sleep(1000)
+            }
+        } catch (err) {
+            if (this.active) {
+                console.error(`[${this.name}] loop error: ${err.message}`)
+            }
+        }
+
+    }
+}
+</file>
+
+<file path="src/services/FarmingService.mjs">
+import  { Vec3 } from 'vec3'
+
+export class FarmingService {
+    constructor(ctx) {
+        this.ctx = ctx
+        this.busy = false
+        this.recentTargets = new Map()
+    }
+
+    async runOnce() {
+        if (this.busy) return
+        this.busy = true
+
+        let crop = null
+
+        try {
+            crop = await this.findHarvestableCrop()
+
+            if (!crop) {
+                console.log('[farming] no harvestable crop found')
+                return
+            }
+            
+            const pos = crop.position
+
+            await this.ctx.services.movement.goNear(pos, 2)
+            const freshCrop = this.ctx.bot.blockAt(pos)
+
+            if (!this.isHarvestableCrop(freshCrop)) {
+                console.log('[farming] crop is no longer harvestable')
+                this.markTargetCooldown(pos, 3000)
+                return
+            }
+
+            const cropName = freshCrop.name
+
+            await this.harvestCrop(freshCrop) 
+
+            // wait a moment for drops to appear
+            await new Promise(resolve => setTimeout(resolve, 800))
+            await this.ctx.services.pickup.collectAllNearby(8, 5)
+            
+            await this.replantCrop(pos, cropName)
+        } catch (err) {
+            console.error(`[farming] runOnce error: ${err.message}`)
+
+            if (crop?.position) {
+                this.markTargetCooldown(crop.position, 5000)
+            }
+        } finally {
+            this.busy = false
+        }
+    }
+
+    async harvestCrop(block) {
+        if (!block) return
+
+        console.log(`[farming] harvesting ${block.name}`)
+        await this.ctx.bot.dig(block)
+        console.log('[farming] harvest complete')
+    }
+
+    async findHarvestableCrop() {
+        const bot = this.ctx.bot
+
+        const crop = bot.findBlock({
+            maxDistance: 16,
+            matching: (block) => {
+                // if (!block) return false
+                // if (!block.position) return false
+
+                return this.isHarvestableCrop(block) && !this.isOnCooldown(block.position)
+            }
+        })
+
+        return crop ?? null
+    }
+
+    isHarvestableCrop(block) {
+        if (!block) return false
+
+        const rawAge = block.getProperties?.()?.age
+        const age = rawAge == null ? null : Number(rawAge)
+
+        if (
+            block.name === 'wheat' ||
+            block.name === 'carrots' ||
+            block.name === 'potatoes' ||
+            block.name === 'beetroots'
+        ) {
+            return this.isMatureByAge(block.name, age)
+        }
+
+        if (block.name === 'nether_wart') {
+            return age === 3
+        }
+
+        return false
+    }
+
+    isMatureByAge(blockName, age) {
+        if (typeof age !== 'number' || Number.isNaN(age)) return false
+
+        switch (blockName) {
+            case 'wheat':
+            case 'carrots':
+            case 'potatoes':
+                return age === 7
+            case 'beetroots':
+                return age === 3
+            default:
+                return false
+        }
+    }
+
+    // Helper to convert position into string for key > value Map
+    getTargetKey(position) {
+        if (!position) return null
+        return `${position.x}, ${position.y}, ${position.z}`
+    }
+
+    // Checks if target crop is on cooldown
+    isOnCooldown(position) {
+        const key = this.getTargetKey(position)
+        if (!key) return false
+
+        const until = this.recentTargets.get(key)
+        if (!until) return false
+
+        if (Date.now() > until) {
+            this.recentTargets.delete(key)
+            return false
+        }
+
+        return true
+    }
+
+    // Temporarily mark failed crop targets so the bot does not keep retrying
+    // the same unreachable plant every loop.
+    // Flow:
+    // 1. Bot selects a crop
+    // 2. Bot walks to it
+    // 3. Bot tries to harvest it
+    // 4. Harvest fails or the crop cannot be reached
+    // 5. Bot skips that crop for a short time and tries another one
+    // 6. After the cooldown expires, the crop can be targeted again
+    markTargetCooldown(position, ms = 5000) {
+        const key = this.getTargetKey(position)
+        this.recentTargets.set(key, Date.now() + ms)
+    }
+
+    async replantCrop(position, cropName) {
+        const bot = this.ctx.bot
+
+        const targetBlock = bot.blockAt(position)
+        const blockBelow = bot.blockAt(position.offset(0, -1, 0))
+
+        if (!targetBlock || targetBlock.name !== 'air') {
+            console.log(`[farming] cannot replant, target block is empty`)
+            return
+        }
+
+        // Check soil
+        const requiredSoil = this.getRequiredSoilForCrop(cropName)
+        if (!requiredSoil) {
+            console.log(`[farming] no soil mapping for crop ${cropName}`)
+            return
+        }
+
+        if (!blockBelow || blockBelow.name !== requiredSoil) {
+            console.log(`[farming] cannot replant, block below is not ${requiredSoil}`)
+            return
+        }
+
+        // Check seed
+        const seedItemName = this.getSeedItemNameForCrop(cropName)
+        if (!seedItemName) {
+            console.log(`[farming] no seed mapping for crop ${cropName}`)
+            return
+        }
+
+        const seedItem = bot.inventory.items().find(item => item.name === seedItemName)
+        if (!seedItem) {
+            console.log(`[farming] no ${seedItemName} in inventory`)
+            return
+        }
+
+        await bot.equip(seedItem, 'hand')
+        await bot.placeBlock(blockBelow, new Vec3(0, 1, 0))
+
+        console.log(`[farming] replanted ${cropName}`)
+    }
+
+    getSeedItemNameForCrop(cropName) {
+        switch (cropName) {
+            case 'wheat':
+                return 'wheat_seeds'
+            case 'carrots':
+                return 'carrot'
+            case 'potatoes':
+                return 'potato'
+            case 'beetroots':
+                return 'beetroot_seeds'
+            case 'nether_wart':
+                return 'nether_wart'
+            default:
+                return null
+        }
+    }
+
+    getRequiredSoilForCrop(cropName) {
+        switch (cropName) {
+            case 'wheat':
+            case 'carrots':
+            case 'potatoes':
+            case 'beetroots':
+                return 'farmland'
+            case 'nether_wart':
+                return 'soul_sand'
+            default:
+                return null
+        }
+    }
+}
+</file>
+
+<file path="src/services/ItemPickupService.mjs">
+export class ItemPickupService {
+    constructor(ctx) {
+        this.ctx = ctx
+    }
+
+    findNearestDroppedItem(maxDistance = 8) {
+        const bot = this.ctx.bot
+ 
+        const entity = bot.nearestEntity((entity) => {
+            if (!entity) return false
+            if (!entity.position) return false
+
+            // Dropped ground items are entities of type "object"
+            // and usually have name "item"
+            if (entity.name !== 'item') return false
+
+            const distance = bot.entity.position.distanceTo(entity.position)
+            return distance <= maxDistance
+        })
+
+        return entity ?? null
+    } 
+    
+    async collectNearest(maxDistance = 8) {
+        const bot = this.ctx.bot
+        const item = this.findNearestDroppedItem(maxDistance)
+
+        if(!item) {
+            console.log('[pickup] no dropped item nearby')
+            return false
+        }
+
+        const pos = item.position
+
+        await this.ctx.services.movement.goNear(pos, 0.6)
+        
+        return true
+    }
+
+    async collectAllNearby(maxDistance = 8, maxItems = 5) {
+        let collectedAny = false
+        
+        for (let i = 0; i < maxItems; i++) {
+            const collected = await this.collectNearest(maxDistance)
+            if (!collected) break
+
+            collectedAny = true
+
+            // small pause so the server can register the pickup
+            await new Promise(resolve => setTimeout(resolve, 200))
+        }
+
+        return collectedAny
+    }
+}
+</file>
+
+<file path="src/services/MovementService.mjs">
+import { createRequire } from 'module'
+
+const require = createRequire(import.meta.url)
+const { Movements, goals } = require('mineflayer-pathfinder')
+const { GoalNear } = goals
+
+export class MovementService {
+    constructor(ctx) {
+        this.ctx = ctx
+        this.movements = null
+    }
+
+    ensureReady() {
+        const bot = this.ctx.bot
+
+        if (!bot.pathfinder) {
+            throw new Error('Pathfinder plugin is not loaded')
+        }
+
+        if (!this.movements) {
+            this.movements = new Movements(bot)
+            this.movements.canDig = false
+            this.movements.allow1by1towers = false
+            bot.pathfinder.setMovements(this.movements)
+        }
+    }
+
+    async goNear(position, range = 1) {
+        const bot = this.ctx.bot
+
+        this.ensureReady()
+
+        await bot.pathfinder.goto(
+            new GoalNear(position.x, position.y, position.z, range)
+        )
+    }
+}
+</file>
+
+<file path="src/utils/sleep.mjs">
+export function sleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms))
+}
+</file>
+
+<file path=".gitignore">
+.package-lock.json
+node_modules/
+ACCOUNT.json
+</file>
+
+<file path="package.json">
+{
+  "dependencies": {
+    "mineflayer": "^4.37.0",
+    "mineflayer-pathfinder": "^2.4.5"
+  }
+}
+</file>
+
+</files>
