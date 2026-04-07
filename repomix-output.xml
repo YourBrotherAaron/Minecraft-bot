@@ -44,9 +44,11 @@ The content is organized as follows:
 index.mjs
 package.json
 src/config/botConfig.mjs
+src/config/botDefinitions.mjs
 src/core/BaseRole.mjs
 src/core/BotContext.mjs
 src/core/BotManager.mjs
+src/core/RoleFactory.mjs
 src/roles/FarmerRole.mjs
 src/services/FarmingService.mjs
 src/services/InventoryService.mjs
@@ -59,19 +61,6 @@ src/utils/sleep.mjs
 <files>
 This section contains the contents of the repository's files.
 
-<file path="index.mjs">
-import { botConfig } from './src/config/botConfig.mjs'
-import { BotManager } from './src/core/BotManager.mjs'
-import { BaseRole } from './src/core/BaseRole.mjs'
-import { FarmerRole } from './src/roles/FarmerRole.mjs'
-
-// const role = new BaseRole('idle')
-const role = new FarmerRole()
-const manager = new BotManager(botConfig, role)
-
-await manager.start()
-</file>
-
 <file path="src/config/botConfig.mjs">
 export const botConfig = {
     host: 'localhost',
@@ -79,6 +68,41 @@ export const botConfig = {
     version: '1.21.11',
     username: 'TestBot'
 }
+</file>
+
+<file path="src/config/botDefinitions.mjs">
+export const botDefinitions = [
+    {
+        username: 'FarmerBot1',
+        role: 'farmer',
+        settings: {
+            inventoryTreshhold: 30,
+            farmArea: {
+                minX: 0,
+                maxX: 6,
+                minY: -64,
+                maxY: 64,
+                minZ: -2,
+                maxZ: 10
+            }
+        }
+    },
+    {
+        username: 'FarmerBot2',
+        role: 'farmer',
+        settings: {
+            inventoryTreshhold: 30,
+            farmArea: {
+                minX: 17,
+                maxX: 23,
+                minY: -64,
+                maxY: 64,
+                minZ: -2,
+                maxZ: 10
+            }
+        }
+    }
+]
 </file>
 
 <file path="src/core/BaseRole.mjs">
@@ -111,6 +135,19 @@ export class BotContext {
 
         this.services = {}
         this.eventBus = null
+    }
+}
+</file>
+
+<file path="src/core/RoleFactory.mjs">
+import { FarmerRole } from '../roles/FarmerRole.mjs'
+
+export function createRole(roleName) {
+    switch (roleName) {
+        case 'farmer':
+            return new FarmerRole()
+        default:
+            throw new Error(`Unknown role: ${roleName}`)
     }
 }
 </file>
@@ -225,6 +262,29 @@ export function sleep(ms) {
 .package-lock.json
 node_modules/
 ACCOUNT.json
+</file>
+
+<file path="index.mjs">
+import { botConfig } from './src/config/botConfig.mjs'
+import { botDefinitions } from './src/config/BotDefinitions.mjs'
+import { BotManager } from './src/core/BotManager.mjs'
+import { createRole } from './src/core/RoleFactory.mjs'
+
+const managers = []
+
+for (const botDef of botDefinitions) {
+    const role = createRole(botDef.role)
+
+    const config = {
+        ...botConfig,
+        username: botDef.username
+    }
+
+    const manager = new BotManager(config, role)
+    managers.push(manager)
+
+    await manager.start()
+}
 </file>
 
 <file path="package.json">
@@ -446,7 +506,9 @@ export class FarmingService {
                 this.markTargetCooldown(pos, 4000)
             }
 
-            if (this.ctx.services.inventory.isInventoryNearlyFull()) {
+            const threshold = this.ctx.config.settings?.inventoryTreshold ?? 30
+
+            if (this.ctx.services.inventory.isInventoryNearlyFull(threshold)) {
                 console.log(`[farming] inventory is getting full`)
 
                 await this.ctx.services.storage.depositExcessItems({
@@ -490,6 +552,7 @@ export class FarmingService {
             const block = bot.blockAt(pos)
             if (!block) continue
             if (!block.position) continue
+            if (!this.isInsideFarmingArea(block.position)) continue
             if (this.isOnCooldown(block.position)) continue
 
             return block
@@ -646,6 +709,23 @@ export class FarmingService {
             default:
                 return null
         }
+    }
+
+    isInsideFarmingArea(position) {
+        const farmArea = this.ctx.config.settings?.farmArea
+
+        // No farm area configures = no restriction
+        if (!farmArea) return true
+        if (!position) return false
+
+        return (
+            position.x >= farmArea.minX &&
+            position.x <= farmArea.maxX &&
+            position.y >= farmArea.minY &&
+            position.y <= farmArea.maxY &&
+            position.z >= farmArea.minZ &&
+            position.z <= farmArea.maxZ
+        )
     }
 }
 </file>

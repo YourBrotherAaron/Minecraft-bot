@@ -46,7 +46,9 @@ export class FarmingService {
                 this.markTargetCooldown(pos, 4000)
             }
 
-            if (this.ctx.services.inventory.isInventoryNearlyFull()) {
+            const threshold = this.ctx.config.settings?.inventoryThreshold ?? 30
+
+            if (this.ctx.services.inventory.isInventoryNearlyFull(threshold)) {
                 console.log(`[farming] inventory is getting full`)
 
                 await this.ctx.services.storage.depositExcessItems({
@@ -90,6 +92,7 @@ export class FarmingService {
             const block = bot.blockAt(pos)
             if (!block) continue
             if (!block.position) continue
+            if (!this.isInsideFarmingArea(block.position)) continue
             if (this.isOnCooldown(block.position)) continue
 
             return block
@@ -246,5 +249,22 @@ export class FarmingService {
             default:
                 return null
         }
+    }
+
+    isInsideFarmingArea(position) {
+        const farmArea = this.ctx.config.settings?.farmArea
+
+        // No farm area configures = no restriction
+        if (!farmArea) return true
+        if (!position) return false
+
+        return (
+            position.x >= farmArea.minX &&
+            position.x <= farmArea.maxX &&
+            position.y >= farmArea.minY &&
+            position.y <= farmArea.maxY &&
+            position.z >= farmArea.minZ &&
+            position.z <= farmArea.maxZ
+        )
     }
 }

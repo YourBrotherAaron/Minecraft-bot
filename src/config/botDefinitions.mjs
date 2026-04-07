@@ -3,13 +3,13 @@ export const botDefinitions = [
         username: 'FarmerBot1',
         role: 'farmer',
         settings: {
-            inventoryTreshhold: 30,
+            inventoryThreshold: 30,
             farmArea: {
                 minX: 0,
                 maxX: 6,
                 minY: -64,
                 maxY: 64,
-                mixZ: -2,
+                minZ: -2,
                 maxZ: 10
             }
         }
@@ -24,7 +24,7 @@ export const botDefinitions = [
                 maxX: 23,
                 minY: -64,
                 maxY: 64,
-                mixZ: -2,
+                minZ: -2,
                 maxZ: 10
             }
         }
