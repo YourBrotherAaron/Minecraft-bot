@@ -1,10 +1,20 @@
 import { botConfig } from './src/config/botConfig.mjs'
+import { botDefinitions } from './src/config/BotDefinitions.mjs'
 import { BotManager } from './src/core/BotManager.mjs'
-import { BaseRole } from './src/core/BaseRole.mjs'
-import { FarmerRole } from './src/roles/FarmerRole.mjs'
+import { createRole } from './src/core/RoleFactory.mjs'
 
-// const role = new BaseRole('idle')
-const role = new FarmerRole()
-const manager = new BotManager(botConfig, role)
+const managers = []
 
-await manager.start()
+for (const botDef of botDefinitions) {
+    const role = createRole(botDef.role)
+
+    const config = {
+        ...botConfig,
+        username: botDef.username
+    }
+
+    const manager = new BotManager(config, role)
+    managers.push(manager)
+
+    await manager.start()
+}
