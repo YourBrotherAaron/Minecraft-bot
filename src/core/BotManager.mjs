@@ -1,6 +1,7 @@
 import mineflayer from 'mineflayer'
 import { createRequire } from 'module'
 import { BotContext } from './BotContext.mjs'
+import { sleep } from '../utils/sleep.mjs'
 import { FarmingService } from '../services/FarmingService.mjs'
 import { FishingService } from '../services/FishingService.mjs'
 import { MovementService } from '../services/MovementService.mjs'
@@ -42,6 +43,8 @@ export class BotManager {
 
         this.bot.once('spawn', async () => {
             console.log(`[${this.bot.username}] spawned`)
+
+            await sleep(5000)
             await this.role.start(this.ctx)
         })
     }

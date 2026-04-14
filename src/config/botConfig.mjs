@@ -1,6 +1,6 @@
 export const botConfig = {
-    host: 'localhost',
-    port: 3030,
+    host: '127.0.0.1',
+    port: 25565,
     version: '1.21.11',
     username: 'TestBot'
 }
