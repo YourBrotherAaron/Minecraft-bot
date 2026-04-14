@@ -18,46 +18,20 @@ export class FishingService {
                 return
             }
 
-            const waterBlock = this.findFishingWater()
-            if (!waterBlock) {
+            const fishingSpot = this.findFishingSpot()
+
+            if (!fishingSpot) {
                 console.log('[fishing] no suitable water found nearby')
                 return
             }
-            console.log(`[fishing] found water block position: ${waterBlock.position}`)
 
-
-
-            await this.goToFishingSpot(waterBlock)
-            console.log('[fishing] after move pos:', this.ctx.bot.entity.position)
-            console.log('[fishing] after move vel:', this.ctx.bot.entity.velocity)
-            
-            await this.lookAtFishingSpot(waterBlock)
-
+            await this.goToFishingSpot(fishingSpot.standPos)
             await this.ctx.bot.equip(rod, 'hand')
+            await this.lookAtFishingSpot(fishingSpot.waterBlock)
 
-            
-            console.log('[fishing] before fishing yaw:', this.ctx.bot.entity.yaw)
-            console.log('[fishing] before fishing pitch:', this.ctx.bot.entity.pitch)
-            const fishingPromise = this.ctx.bot.fish()
-            await sleep(3000)
-
-            const bobber = this.findFishingBobber()
-            if (bobber) {
-                console.log('[fishing] bobber spawn position:', bobber.position)
-                console.log('[fishing] while fishing yaw:', this.ctx.bot.entity.yaw)
-                console.log('[fishing] while fishing pitch:', this.ctx.bot.entity.pitch)
-            } else {
-                console.log('[fishing] no bobber found after cast')
-            }
-            
-            await fishingPromise
-            
-            console.log('[fishing] after fishing yaw:', this.ctx.bot.entity.yaw)
-            console.log('[fishing] after fishing pitch:', this.ctx.bot.entity.pitch)
-            
-            
-            
-
+            console.log('[fishing] casting line')
+            await this.ctx.bot.fish()
+            console.log('[fishing] caught something')
 
             await sleep(500)
         } catch (err) {
@@ -71,59 +45,129 @@ export class FishingService {
         return this.ctx.services.inventory.findItemByName('fishing_rod')
     }
 
-    findFishingWater() {
+    isOpenWater(block) {
+        const bot = this.ctx.bot
+        if (!block) return false
+        if (block.name !== 'water') return false
+
+        const above1 = bot.blockAt(block.position.offset(0, 1, 0))
+        const above2 = bot.blockAt(block.position.offset(0, 2, 0))
+
+        if (!above1 || above1.name !== 'air') return false
+        if (!above2 || above2.name !== 'air') return false
+
+        return true
+    }
+
+    isStandableSpot(standPos) {
+        const bot = this.ctx.bot
+
+        const feetBlock = bot.blockAt(standPos)
+        const headBlock = bot.blockAt(standPos.offset(0, 1, 0))
+        const belowBlock = bot.blockAt(standPos.offset(0, -1, 0))
+
+        if (!feetBlock || feetBlock.name !== 'air') return false
+        if (!headBlock || headBlock.name !== 'air') return false
+        if (!belowBlock) return false
+
+        // Must stand on something solid-ish
+        if (belowBlock.name === 'air' || belowBlock.name === 'water' || belowBlock.name === 'lava') {
+            return false
+        }
+
+        return true
+    }
+
+    hasCastObstructionFrom(standPos, waterBlock) {
+        const bot = this.ctx.bot
+        const waterPos = waterBlock.position
+
+        const dx = waterPos.x - standPos.x
+        const dz = waterPos.z - standPos.z
+
+        const steps = Math.max(Math.abs(dx), Math.abs(dz))
+        if (steps === 0) return false
+
+        // Check a simple line from stand position toward water
+        for (let i = 1; i <= steps; i++) {
+            const x = standPos.x + Math.round((dx * i) / steps)
+            const z = standPos.z + Math.round((dz * i) / steps)
+
+            // Check at body/head heights
+            const block1 = bot.blockAt(standPos.offset(x - standPos.x, 1, z - standPos.z))
+            const block2 = bot.blockAt(standPos.offset(x - standPos.x, 2, z - standPos.z))
+
+            const blocked1 = block1 && block1.name !== 'air' && block1.name !== 'water'
+            const blocked2 = block2 && block2.name !== 'air' && block2.name !== 'water'
+
+            if (blocked1 || blocked2) {
+                return true
+            }
+        }
+
+        return false
+    }
+
+    findFishingSpot() {
         const bot = this.ctx.bot
 
         const positions = bot.findBlocks({
             maxDistance: 16,
-            count: 20,
+            count: 30,
             matching: (block) => {
                 if (!block) return false
                 return block.name === 'water'
             }
         })
 
+        const directions = [
+            { x: 1, z: 0 },
+            { x: -1, z: 0 },
+            { x: 0, z: 1 },
+            { x: 0, z: -1 }
+        ]
+
         for (const pos of positions) {
-            const block = bot.blockAt(pos)
-            if (!block) continue
-            if (!block.position) continue
+            const waterBlock = bot.blockAt(pos)
+            if (!waterBlock) continue
+            if (!waterBlock.position) continue
+            if (!this.isOpenWater(waterBlock)) continue
 
-            return block
-        }
+            for (const dir of directions) {
+                const standPos = waterBlock.position.offset(dir.x, 1, dir.z)
 
-        return null
-    }
+                if (!this.isStandableSpot(standPos)) continue
+                if (this.hasCastObstructionFrom(standPos, waterBlock)) continue
 
-    async goToFishingSpot(waterBlock) {
-        await this.ctx.services.movement.goNear(waterBlock.position, 2)
-        await sleep(5000)
-    }
-
-    async lookAtFishingSpot(waterBlock) {
-        console.log('[fishing] before look yaw:', this.ctx.bot.entity.yaw)
-        console.log('[fishing] before look pitch:', this.ctx.bot.entity.pitch)
-        
-        const lookTarget = waterBlock.position.offset(0.5, 0.5, 0.5)
-
-        await this.ctx.bot.lookAt(lookTarget, true)
-
-        console.log('[fishing] after look yaw:', this.ctx.bot.entity.yaw)
-        console.log('[fishing] after look pitch:', this.ctx.bot.entity.pitch)
-
-        await sleep(5000)
-    }
-
-    findFishingBobber() {
-        const bot = this.ctx.bot
-
-        for (const entity of Object.values(bot.entities)) {
-            if (!entity) continue
-
-            if (entity.name === 'fishing_bobber' || entity.name === 'fishing_hook') {
-                return entity
+                return {
+                    waterBlock,
+                    standPos
+                }
             }
         }
 
         return null
+    }
+
+    async goToFishingSpot(standPos) {
+        await this.ctx.services.movement.goNear(standPos, 0.5)
+        await sleep(500)
+    }
+
+    async lookAtFishingSpot(waterBlock) {
+        const bot = this.ctx.bot
+        const botPos = bot.entity.position
+        const lookTarget = waterBlock.position.offset(0.5, 0.5, 0.5)
+
+        const dx = lookTarget.x - botPos.x
+        const dy = lookTarget.y - (botPos.y + bot.entity.height)
+        const dz = lookTarget.z - botPos.z
+
+        const yaw = Math.atan2(-dx, -dz)
+        const groundDistance = Math.sqrt(dx * dx + dz * dz)
+        const pitch = Math.atan2(dy, groundDistance)
+
+        await bot.look(yaw, pitch, true)
+        await sleep(200)
     }
 }

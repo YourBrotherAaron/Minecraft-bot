@@ -43,6 +43,7 @@ The content is organized as follows:
 .gitignore
 index.mjs
 package.json
+README.md
 src/config/botConfig.mjs
 src/config/botDefinitions.mjs
 src/core/BaseRole.mjs
@@ -63,13 +64,214 @@ src/utils/sleep.mjs
 <files>
 This section contains the contents of the repository's files.
 
-<file path="src/config/botConfig.mjs">
+<file path="README.md">
+# Farming Bot
+
+A Node.js Minecraft bot project built with Mineflayer. The project can run one or more bots, assign each bot a role, and use shared services for movement, farming, fishing, inventory management, item pickup, and chest storage.
+
+## Features
+
+- Multi-bot startup from a single configuration file
+- Role-based bot behavior
+- Farmer role for harvesting and replanting mature crops
+- Fisher role for finding water and fishing with a rod
+- Mineflayer Pathfinder movement
+- Inventory threshold checks
+- Nearby dropped item pickup
+- Chest deposit support for excess items
+- Optional farming-area bounds per farmer bot
+
+## Requirements
+
+- Node.js 18 or newer
+- npm
+- A Minecraft server reachable from the machine running the bot
+- A Minecraft version compatible with the configured Mineflayer version
+
+The current bot config targets Minecraft `1.21.11` on `127.0.0.1:25565`.
+
+## Installation
+
+Install dependencies from the project root:
+
+```bash
+npm install
+```
+
+The main dependencies are:
+
+- `mineflayer`
+- `mineflayer-pathfinder`
+
+## Running
+
+Start the bots with:
+
+```bash
+node index.mjs
+```
+
+The entry point loads bot definitions from:
+
+```text
+src/config/botDefinitions.mjs
+```
+
+For every bot definition, it creates the configured role and starts a separate Mineflayer bot.
+
+## Configuration
+
+### Server Config
+
+Shared server settings live in:
+
+```text
+src/config/botConfig.mjs
+```
+
+Example:
+
+```js
 export const botConfig = {
-    host: 'localhost',
-    port: 3030,
+    host: '127.0.0.1',
+    port: 25565,
     version: '1.21.11',
     username: 'TestBot'
 }
+```
+
+`username` is overwritten by each bot definition when bots are started.
+
+### Bot Definitions
+
+Individual bots are configured in:
+
+```text
+src/config/botDefinitions.mjs
+```
+
+Example fisher bot:
+
+```js
+{
+    username: 'FisherBot1',
+    role: 'fisher',
+    settings: {
+        inventoryThreshold: 30
+    }
+}
+```
+
+Example farmer bot:
+
+```js
+{
+    username: 'FarmerBot1',
+    role: 'farmer',
+    settings: {
+        inventoryThreshold: 30,
+        farmArea: {
+            minX: 0,
+            maxX: 6,
+            minY: -64,
+            maxY: 64,
+            minZ: -2,
+            maxZ: 10
+        }
+    }
+}
+```
+
+Supported roles:
+
+- `farmer`
+- `fisher`
+
+## Roles
+
+### Farmer
+
+The farmer role repeatedly runs a farming cycle:
+
+1. Find a mature crop nearby.
+2. Check that it is inside the configured farm area, if one exists.
+3. Move near the crop.
+4. Harvest it.
+5. Pick up nearby drops.
+6. Replant the crop when possible.
+7. Deposit excess items into nearby chests when inventory usage reaches the threshold.
+
+Supported crop logic includes:
+
+- Wheat
+- Carrots
+- Potatoes
+- Beetroots
+- Nether wart
+
+### Fisher
+
+The fisher role repeatedly runs a fishing cycle:
+
+1. Find a fishing rod in inventory.
+2. Find nearby water.
+3. Move near the water block.
+4. Look at the fishing spot.
+5. Equip the rod.
+6. Cast and wait for the fishing action to complete.
+
+## Project Structure
+
+```text
+index.mjs                         Application entry point
+package.json                      Node dependencies
+src/config/                       Shared config and bot definitions
+src/core/                         Bot manager, context, role factory, and base role
+src/roles/                        Role loops for farmer and fisher bots
+src/services/                     Reusable bot services
+src/utils/                        Small utility helpers
+```
+
+Important files:
+
+```text
+src/core/BotManager.mjs           Creates Mineflayer bots and registers events
+src/core/RoleFactory.mjs          Maps role names to role classes
+src/roles/FarmerRole.mjs          Farmer role loop
+src/roles/FisherRole.mjs          Fisher role loop
+src/services/FarmingService.mjs   Crop harvesting and replanting
+src/services/FishingService.mjs   Fishing behavior
+src/services/MovementService.mjs  Pathfinder movement wrapper
+src/services/InventoryService.mjs Inventory helpers
+src/services/StorageService.mjs   Chest deposit logic
+src/services/ItemPickupService.mjs Dropped item pickup
+```
+
+## Chat Control
+
+If the bot sees a chat message containing `quit`, it disconnects from the server.
+
+## Notes
+
+- `ACCOUNT.json` is ignored by git and should stay private.
+- `node_modules/` is ignored by git and should be recreated with `npm install`.
+- Make sure the bot has the required items before starting a role. For example, the fisher needs a `fishing_rod`, and the farmer needs seeds or crops for replanting.
+- Farmers deposit excess items only when a usable chest is nearby.
+- Movement uses Mineflayer Pathfinder with digging disabled.
+
+## Troubleshooting
+
+If the bot cannot connect, check the server host, port, Minecraft version, and whether online/offline authentication matches your server setup.
+
+If the farmer does not harvest, check that mature crops are within range and inside the configured `farmArea` bounds.
+
+If the fisher does not fish, check that it has a fishing rod and that water exists within the search radius.
+
+If pathfinding fails, make sure the target can be reached without digging, since digging is disabled in `MovementService`.
+
+## License
+
+No license file is currently included in this project.
 </file>
 
 <file path="src/core/BotContext.mjs">
@@ -108,95 +310,6 @@ export class FisherRole extends BaseRole {
                 console.error(`[${this.name}] loop error: ${err.message}`)
             }
         }
-    }
-}
-</file>
-
-<file path="src/services/FishingService.mjs">
-import { sleep } from '../utils/sleep.mjs'
-
-export class FishingService {
-    constructor(ctx) {
-        this.ctx = ctx
-        this.busy = false
-    }
-
-    async runFishingCycle() {
-        if (this.busy) return
-        this.busy = true
-
-        try {
-            const rod = this.findFishingRod()
-
-            if (!rod) {
-                console.log('[fishing] no fishing rod found in inventory')
-                return
-            }
-
-            const waterBlock = this.findFishingWater()
-
-            if (!waterBlock) {
-                console.log('[fishing] no suitable water found nearby')
-                return
-            }
-
-            await this.goToFishingSpot(waterBlock)
-            await this.lookAtFishingSpot(waterBlock)
-
-            await this.ctx.bot.equip(rod, 'hand')
-            console.log('[fishing] casting line')
-            
-            await this.ctx.bot.fish()
-            console.log('[fishing] caught something')
-
-            await sleep(500)
-        } catch (err) {
-            console.log(`[fishing] runFishingCycle error: ${err.message}`)
-        }finally {
-            this.busy = false
-        }
-    }
-
-    findFishingRod() {
-        return this.ctx.services.inventory.findItemByName('fishing_rod')
-    }
-
-    findFishingWater() {
-        const bot = this.ctx.bot
-
-        const positions = bot.findBlocks({
-            maxDistance: 16,
-            count: 20,
-            matching: (block) => {
-                if (!block) return false
-                return block.name === 'water'
-            }
-        })
-
-        for (const pos of positions) {
-            const block = bot.blockAt(pos)
-            if (!block) continue
-            if (!block.position) continue
-            
-            return block
-        }
-
-        return null
-    }
-
-    async goToFishingSpot(waterBlock) {
-        await this.ctx.services.movement.goNear(waterBlock.position, 2)
-
-        await sleep(300)
-    }
-
-    async lookAtFishingSpot(waterBlock) {
-        const bot = this.ctx.bot
-
-        const lookTarget = waterBlock.position.offset(0.5, 0.5, 0.5)
-
-        await bot.lookAt(lookTarget, true)
-        await sleep(200)
     }
 }
 </file>
@@ -307,42 +420,21 @@ export function sleep(ms) {
 }
 </file>
 
-<file path=".gitignore">
-.package-lock.json
-node_modules/
-ACCOUNT.json
-</file>
-
 <file path="package.json">
 {
   "dependencies": {
-    "mineflayer": "^4.37.0",
+    "mineflayer": "github:PrismarineJS/mineflayer#47a41c666f1f6e6783867ebe81e7386bbae72c24",
     "mineflayer-pathfinder": "^2.4.5"
   }
 }
 </file>
 
-<file path="src/core/BaseRole.mjs">
-import { sleep } from "../utils/sleep.mjs"
-
-export class BaseRole {
-    constructor(name = 'base') {
-        this.name = name
-        this.ctx = null
-        this.active = false
-    }
-
-    async start(ctx) {
-        this.ctx = ctx
-        this.active = true
-        console.log(`[role:${this.name}] started`)
-        await sleep(5000)
-    }
-
-    async stop() {
-        this.active = false
-        console.log(`[role:${this.name}] stopped`)
-    }
+<file path="src/config/botConfig.mjs">
+export const botConfig = {
+    host: '127.0.0.1',
+    port: 25565,
+    version: '1.21.11',
+    username: 'TestBot'
 }
 </file>
 
@@ -386,6 +478,236 @@ export class FarmerRole extends BaseRole {
             }
         }
 
+    }
+}
+</file>
+
+<file path="src/services/FishingService.mjs">
+import { Vec3 } from 'vec3'
+import { sleep } from '../utils/sleep.mjs'
+
+export class FishingService {
+    constructor(ctx) {
+        this.ctx = ctx
+        this.busy = false
+    }
+
+    async runFishingCycle() {
+        if (this.busy) return
+        this.busy = true
+
+        try {
+            const rod = this.findFishingRod()
+            if (!rod) {
+                console.log('[fishing] no fishing rod found in inventory')
+                return
+            }
+
+            const fishingSpot = this.findBestFishingSpot()
+            if (!fishingSpot) {
+                console.log('[fishing] no suitable fishing spot found nearby')
+                return
+            }
+
+            console.log(
+                `[fishing] using ${fishingSpot.quality} water at ${fishingSpot.waterBlock.position}`
+            )
+
+            await this.goToFishingSpot(fishingSpot.standPos)
+            await this.ctx.bot.equip(rod, 'hand')
+            await this.lookAtFishingSpot(fishingSpot.waterBlock)
+
+            console.log('[fishing] casting line')
+            await this.ctx.bot.fish()
+            console.log('[fishing] caught something')
+
+            await sleep(500)
+        } catch (err) {
+            console.log(`[fishing] runFishingCycle error: ${err.message}`)
+        } finally {
+            this.busy = false
+        }
+    }
+
+    findFishingRod() {
+        return this.ctx.services.inventory.findItemByName('fishing_rod')
+    }
+
+    findBestFishingSpot() {
+        const bot = this.ctx.bot
+
+        const positions = bot.findBlocks({
+            maxDistance: 24,
+            count: 100,
+            matching: (block) => block && block.name === 'water'
+        })
+
+        const perfectCandidates = []
+        const usableCandidates = []
+
+        for (const pos of positions) {
+            const waterBlock = bot.blockAt(pos)
+            if (!waterBlock || !waterBlock.position) continue
+
+            const standPos = this.findStandPositionForWater(waterBlock)
+            if (!standPos) continue
+
+            if (this.isPerfectFishingWater(waterBlock, standPos)) {
+                perfectCandidates.push({ waterBlock, standPos, quality: 'perfect' })
+                continue
+            }
+
+            if (this.isUsableFishingWater(waterBlock, standPos)) {
+                usableCandidates.push({ waterBlock, standPos, quality: 'usable' })
+            }
+        }
+
+        const nearestPerfect = this.getNearestCandidate(perfectCandidates)
+        if (nearestPerfect) return nearestPerfect
+
+        return this.getNearestCandidate(usableCandidates)
+    }
+
+    getNearestCandidate(candidates) {
+        if (candidates.length === 0) return null
+
+        const botPos = this.ctx.bot.entity.position
+
+        candidates.sort((a, b) => {
+            const distA = botPos.distanceTo(a.standPos)
+            const distB = botPos.distanceTo(b.standPos)
+            return distA - distB
+        })
+
+        return candidates[0]
+    }
+
+    findStandPositionForWater(waterBlock) {
+        const directions = [
+            new Vec3(1, 1, 0),
+            new Vec3(-1, 1, 0),
+            new Vec3(0, 1, 1),
+            new Vec3(0, 1, -1)
+        ]
+
+        for (const dir of directions) {
+            const standPos = waterBlock.position.plus(dir)
+
+            if (!this.isStandableSpot(standPos)) continue
+            if (this.hasCastObstructionFrom(standPos, waterBlock)) continue
+
+            return standPos
+        }
+
+        return null
+    }
+
+    isStandableSpot(standPos) {
+        const bot = this.ctx.bot
+
+        const feet = bot.blockAt(standPos)
+        const head = bot.blockAt(standPos.offset(0, 1, 0))
+        const below = bot.blockAt(standPos.offset(0, -1, 0))
+
+        if (!feet || feet.name !== 'air') return false
+        if (!head || head.name !== 'air') return false
+        if (!below) return false
+
+        if (below.name === 'air' || below.name === 'water' || below.name === 'lava') {
+            return false
+        }
+
+        return true
+    }
+
+    hasCastObstructionFrom(standPos, waterBlock) {
+        const bot = this.ctx.bot
+        const waterPos = waterBlock.position
+
+        const dx = waterPos.x - standPos.x
+        const dz = waterPos.z - standPos.z
+        const steps = Math.max(Math.abs(dx), Math.abs(dz))
+
+        if (steps === 0) return false
+
+        for (let i = 1; i <= steps; i++) {
+            const x = standPos.x + Math.round((dx * i) / steps)
+            const z = standPos.z + Math.round((dz * i) / steps)
+
+            const body = bot.blockAt(new Vec3(x, standPos.y, z))
+            const head = bot.blockAt(new Vec3(x, standPos.y + 1, z))
+
+            const blockedBody = body && body.name !== 'air' && body.name !== 'water'
+            const blockedHead = head && head.name !== 'air' && head.name !== 'water'
+
+            if (blockedBody || blockedHead) return true
+        }
+
+        return false
+    }
+
+    isUsableFishingWater(waterBlock, standPos) {
+        if (!this.hasAirAboveWater(waterBlock)) return false
+        if (this.hasCastObstructionFrom(standPos, waterBlock)) return false
+        return true
+    }
+
+    hasAirAboveWater(block) {
+        const bot = this.ctx.bot
+        if (!block || block.name !== 'water') return false
+
+        const above1 = bot.blockAt(block.position.offset(0, 1, 0))
+        const above2 = bot.blockAt(block.position.offset(0, 2, 0))
+
+        return above1?.name === 'air' && above2?.name === 'air'
+    }
+
+    isPerfectFishingWater(waterBlock, standPos) {
+        if (!this.isUsableFishingWater(waterBlock, standPos)) return false
+
+        const bot = this.ctx.bot
+        const center = waterBlock.position
+
+        // Approximate 5 x 4 x 5 check
+        // x: -2..2, z: -2..2
+        // y layers checked: -1, 0, +1, +2 relative to water block
+        for (let dx = -2; dx <= 2; dx++) {
+            for (let dz = -2; dz <= 2; dz++) {
+                const lower = bot.blockAt(center.offset(dx, -1, dz))
+                const water = bot.blockAt(center.offset(dx, 0, dz))
+                const air1 = bot.blockAt(center.offset(dx, 1, dz))
+                const air2 = bot.blockAt(center.offset(dx, 2, dz))
+
+                if (!lower || lower.name !== 'water') return false
+                if (!water || water.name !== 'water') return false
+                if (!air1 || air1.name !== 'air') return false
+                if (!air2 || air2.name !== 'air') return false
+            }
+        }
+
+        return true
+    }
+
+    async goToFishingSpot(standPos) {
+        await this.ctx.services.movement.goNear(standPos, 0.5)
+        await sleep(500)
+    }
+
+    async lookAtFishingSpot(waterBlock) {
+        const bot = this.ctx.bot
+        const botPos = bot.entity.position
+        const lookTarget = waterBlock.position.offset(0.5, 0.5, 0.5)
+
+        const dx = lookTarget.x - botPos.x
+        const dy = lookTarget.y - (botPos.y + bot.entity.height)
+        const dz = lookTarget.z - botPos.z
+
+        const yaw = Math.atan2(-dx, -dz)
+        const groundDistance = Math.sqrt(dx * dx + dz * dz)
+        const pitch = Math.atan2(dy, groundDistance)
+
+        await bot.look(yaw, pitch, true)
+        await sleep(200)
     }
 }
 </file>
@@ -436,6 +758,13 @@ export class InventoryService{
         }
     }
 }
+</file>
+
+<file path=".gitignore">
+.package-lock.json
+node_modules/
+ACCOUNT.json
+repomix-output.xml
 </file>
 
 <file path="index.mjs">
@@ -504,89 +833,23 @@ export const botDefinitions = [
 ]
 </file>
 
-<file path="src/core/BotManager.mjs">
-import mineflayer from 'mineflayer'
-import { createRequire } from 'module'
-import { BotContext } from './BotContext.mjs'
-import { FarmingService } from '../services/FarmingService.mjs'
-import { FishingService } from '../services/FishingService.mjs'
-import { MovementService } from '../services/MovementService.mjs'
-import { ItemPickupService } from '../services/ItemPickupService.mjs'
-import { InventoryService } from '../services/InventoryService.mjs'
-import { StorageService } from '../services/StorageService.mjs'
-
-const require = createRequire(import.meta.url)
-const { pathfinder } = require('mineflayer-pathfinder')
-
-export class BotManager {
-    constructor(config, role) {
-        this.config = config
-        this.role = role
-        this.bot = null
+<file path="src/core/BaseRole.mjs">
+export class BaseRole {
+    constructor(name = 'base') {
+        this.name = name
         this.ctx = null
+        this.active = false
     }
 
-    async start() {
-        this.bot = mineflayer.createBot(this.config)
-        this.bot.loadPlugin(pathfinder)
-
-        this.ctx = new BotContext({
-            bot: this.bot,
-            config: this.config,
-            role: this.role,
-        })
-
-        this.ctx.services = {
-            farming: new FarmingService(this.ctx),
-            fishing: new FishingService(this.ctx),
-            movement: new MovementService(this.ctx),
-            pickup: new ItemPickupService(this.ctx),
-            inventory: new InventoryService(this.ctx),
-            storage: new StorageService(this.ctx),
-        }
-
-        this.registerEvents()
-
-        this.bot.once('spawn', async () => {
-            console.log(`[${this.bot.username}] spawned`)
-            await this.role.start(this.ctx)
-        })
+    async start(ctx) {
+        this.ctx = ctx
+        this.active = true
+        console.log(`[role:${this.name}] started`)
     }
 
-    registerEvents() {
-        this.bot.on('login', () => {
-            console.log(`[${this.bot.username}] logged in`)
-        })
-
-        this.bot.on('messagestr', (message, messagePosition) => {
-            if (messagePosition === 'chat' && message.includes('quit')) {
-                this.bot.quit()
-            }
-        })
-
-        this.bot.on('kicked', (reason, loggedIn) => {
-            const text = typeof reason === 'string' ? reason : JSON.stringify(reason)
-
-            if (loggedIn) {
-                console.log(`[${this.bot.username}] kicked: ${text}`)
-            } else {
-                console.log(`[${this.bot.username}] kicked while connecting: ${text}`)
-            }
-        })
-
-        this.bot.on('error', (err) => {
-            console.log(`[${this.bot.username}] error: ${err.message}`)
-        })
-
-        this.bot.on('end', async () => {
-            console.log(`[${this.bot.username}] disconnected`)
-
-            try {
-                await this.role.stop()
-            } catch (err) {
-                console.error(`[${this.bot.username}] role stop error: ${err.message}`)
-            }
-        })
+    async stop() {
+        this.active = false
+        console.log(`[role:${this.name}] stopped`)
     }
 }
 </file>
@@ -727,6 +990,96 @@ export class StorageService {
         if (!key) return
 
         this.recentChests.set(key, Date.now() + ms)
+    }
+}
+</file>
+
+<file path="src/core/BotManager.mjs">
+import mineflayer from 'mineflayer'
+import { createRequire } from 'module'
+import { BotContext } from './BotContext.mjs'
+import { sleep } from '../utils/sleep.mjs'
+import { FarmingService } from '../services/FarmingService.mjs'
+import { FishingService } from '../services/FishingService.mjs'
+import { MovementService } from '../services/MovementService.mjs'
+import { ItemPickupService } from '../services/ItemPickupService.mjs'
+import { InventoryService } from '../services/InventoryService.mjs'
+import { StorageService } from '../services/StorageService.mjs'
+
+const require = createRequire(import.meta.url)
+const { pathfinder } = require('mineflayer-pathfinder')
+
+export class BotManager {
+    constructor(config, role) {
+        this.config = config
+        this.role = role
+        this.bot = null
+        this.ctx = null
+    }
+
+    async start() {
+        this.bot = mineflayer.createBot(this.config)
+        this.bot.loadPlugin(pathfinder)
+
+        this.ctx = new BotContext({
+            bot: this.bot,
+            config: this.config,
+            role: this.role,
+        })
+
+        this.ctx.services = {
+            farming: new FarmingService(this.ctx),
+            fishing: new FishingService(this.ctx),
+            movement: new MovementService(this.ctx),
+            pickup: new ItemPickupService(this.ctx),
+            inventory: new InventoryService(this.ctx),
+            storage: new StorageService(this.ctx),
+        }
+
+        this.registerEvents()
+
+        this.bot.once('spawn', async () => {
+            console.log(`[${this.bot.username}] spawned`)
+
+            await sleep(5000)
+            await this.role.start(this.ctx)
+        })
+    }
+
+    registerEvents() {
+        this.bot.on('login', () => {
+            console.log(`[${this.bot.username}] logged in`)
+        })
+
+        this.bot.on('messagestr', (message, messagePosition) => {
+            if (messagePosition === 'chat' && message.includes('quit')) {
+                this.bot.quit()
+            }
+        })
+
+        this.bot.on('kicked', (reason, loggedIn) => {
+            const text = typeof reason === 'string' ? reason : JSON.stringify(reason)
+
+            if (loggedIn) {
+                console.log(`[${this.bot.username}] kicked: ${text}`)
+            } else {
+                console.log(`[${this.bot.username}] kicked while connecting: ${text}`)
+            }
+        })
+
+        this.bot.on('error', (err) => {
+            console.log(`[${this.bot.username}] error: ${err.message}`)
+        })
+
+        this.bot.on('end', async () => {
+            console.log(`[${this.bot.username}] disconnected`)
+
+            try {
+                await this.role.stop()
+            } catch (err) {
+                console.error(`[${this.bot.username}] role stop error: ${err.message}`)
+            }
+        })
     }
 }
 </file>

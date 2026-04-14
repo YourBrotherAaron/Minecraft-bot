@@ -1,6 +1,6 @@
 {
   "dependencies": {
-    "mineflayer": "^4.37.0",
+    "mineflayer": "github:PrismarineJS/mineflayer#47a41c666f1f6e6783867ebe81e7386bbae72c24",
     "mineflayer-pathfinder": "^2.4.5"
   }
 }
