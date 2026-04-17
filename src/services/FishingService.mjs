@@ -1,6 +1,10 @@
 import { sleep } from '../utils/sleep.mjs'
 
+const FISHING_SEARCH_RADIUS = 16
+const FISHING_SEARCH_COUNT = 30
+
 export class FishingService {
+
     constructor(ctx) {
         this.ctx = ctx
         this.busy = false
@@ -11,6 +15,15 @@ export class FishingService {
         this.busy = true
 
         try {
+            const threshold = this.ctx.config.settings?.inventoryThreshold ?? 30
+            
+            if (this.ctx.services.inventory.isInventoryNearlyFull(threshold)) {
+                console.log(`[fishing] inventory is getting full`)
+                await this.ctx.services.storage.depositExcessItems({
+                    fishing_rod: 1
+                })
+            }
+
             const rod = this.findFishingRod()
 
             if (!rod) {
@@ -32,7 +45,7 @@ export class FishingService {
             console.log('[fishing] casting line')
             await this.ctx.bot.fish()
             console.log('[fishing] caught something')
-
+            
             await sleep(500)
         } catch (err) {
             console.log(`[fishing] runFishingCycle error: ${err.message}`)
@@ -45,7 +58,7 @@ export class FishingService {
         return this.ctx.services.inventory.findItemByName('fishing_rod')
     }
 
-    isOpenWater(block) {
+    hasAirAboveWater(block) {
         const bot = this.ctx.bot
         if (!block) return false
         if (block.name !== 'water') return false
@@ -94,13 +107,13 @@ export class FishingService {
             const z = standPos.z + Math.round((dz * i) / steps)
 
             // Check at body/head heights
-            const block1 = bot.blockAt(standPos.offset(x - standPos.x, 1, z - standPos.z))
-            const block2 = bot.blockAt(standPos.offset(x - standPos.x, 2, z - standPos.z))
+            const bodyBlock = bot.blockAt(standPos.offset(x - standPos.x, 1, z - standPos.z))
+            const headBlock = bot.blockAt(standPos.offset(x - standPos.x, 2, z - standPos.z))
 
-            const blocked1 = block1 && block1.name !== 'air' && block1.name !== 'water'
-            const blocked2 = block2 && block2.name !== 'air' && block2.name !== 'water'
+            const blockedBody = bodyBlock && bodyBlock.name !== 'air' && bodyBlock.name !== 'water'
+            const blockedHead = headBlock && headBlock.name !== 'air' && headBlock.name !== 'water'
 
-            if (blocked1 || blocked2) {
+            if (blockedBody || blockedHead) {
                 return true
             }
         }
@@ -112,8 +125,8 @@ export class FishingService {
         const bot = this.ctx.bot
 
         const positions = bot.findBlocks({
-            maxDistance: 16,
-            count: 30,
+            maxDistance: FISHING_SEARCH_RADIUS,
+            count: FISHING_SEARCH_COUNT,
             matching: (block) => {
                 if (!block) return false
                 return block.name === 'water'
@@ -131,7 +144,7 @@ export class FishingService {
             const waterBlock = bot.blockAt(pos)
             if (!waterBlock) continue
             if (!waterBlock.position) continue
-            if (!this.isOpenWater(waterBlock)) continue
+            if (!this.hasAirAboveWater(waterBlock)) continue
 
             for (const dir of directions) {
                 const standPos = waterBlock.position.offset(dir.x, 1, dir.z)
@@ -168,6 +181,6 @@ export class FishingService {
         const pitch = Math.atan2(dy, groundDistance)
 
         await bot.look(yaw, pitch, true)
-        await sleep(200)
+        await sleep(500)
     }
 }

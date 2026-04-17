@@ -420,15 +420,6 @@ export function sleep(ms) {
 }
 </file>
 
-<file path="package.json">
-{
-  "dependencies": {
-    "mineflayer": "github:PrismarineJS/mineflayer#47a41c666f1f6e6783867ebe81e7386bbae72c24",
-    "mineflayer-pathfinder": "^2.4.5"
-  }
-}
-</file>
-
 <file path="src/config/botConfig.mjs">
 export const botConfig = {
     host: '127.0.0.1',
@@ -478,236 +469,6 @@ export class FarmerRole extends BaseRole {
             }
         }
 
-    }
-}
-</file>
-
-<file path="src/services/FishingService.mjs">
-import { Vec3 } from 'vec3'
-import { sleep } from '../utils/sleep.mjs'
-
-export class FishingService {
-    constructor(ctx) {
-        this.ctx = ctx
-        this.busy = false
-    }
-
-    async runFishingCycle() {
-        if (this.busy) return
-        this.busy = true
-
-        try {
-            const rod = this.findFishingRod()
-            if (!rod) {
-                console.log('[fishing] no fishing rod found in inventory')
-                return
-            }
-
-            const fishingSpot = this.findBestFishingSpot()
-            if (!fishingSpot) {
-                console.log('[fishing] no suitable fishing spot found nearby')
-                return
-            }
-
-            console.log(
-                `[fishing] using ${fishingSpot.quality} water at ${fishingSpot.waterBlock.position}`
-            )
-
-            await this.goToFishingSpot(fishingSpot.standPos)
-            await this.ctx.bot.equip(rod, 'hand')
-            await this.lookAtFishingSpot(fishingSpot.waterBlock)
-
-            console.log('[fishing] casting line')
-            await this.ctx.bot.fish()
-            console.log('[fishing] caught something')
-
-            await sleep(500)
-        } catch (err) {
-            console.log(`[fishing] runFishingCycle error: ${err.message}`)
-        } finally {
-            this.busy = false
-        }
-    }
-
-    findFishingRod() {
-        return this.ctx.services.inventory.findItemByName('fishing_rod')
-    }
-
-    findBestFishingSpot() {
-        const bot = this.ctx.bot
-
-        const positions = bot.findBlocks({
-            maxDistance: 24,
-            count: 100,
-            matching: (block) => block && block.name === 'water'
-        })
-
-        const perfectCandidates = []
-        const usableCandidates = []
-
-        for (const pos of positions) {
-            const waterBlock = bot.blockAt(pos)
-            if (!waterBlock || !waterBlock.position) continue
-
-            const standPos = this.findStandPositionForWater(waterBlock)
-            if (!standPos) continue
-
-            if (this.isPerfectFishingWater(waterBlock, standPos)) {
-                perfectCandidates.push({ waterBlock, standPos, quality: 'perfect' })
-                continue
-            }
-
-            if (this.isUsableFishingWater(waterBlock, standPos)) {
-                usableCandidates.push({ waterBlock, standPos, quality: 'usable' })
-            }
-        }
-
-        const nearestPerfect = this.getNearestCandidate(perfectCandidates)
-        if (nearestPerfect) return nearestPerfect
-
-        return this.getNearestCandidate(usableCandidates)
-    }
-
-    getNearestCandidate(candidates) {
-        if (candidates.length === 0) return null
-
-        const botPos = this.ctx.bot.entity.position
-
-        candidates.sort((a, b) => {
-            const distA = botPos.distanceTo(a.standPos)
-            const distB = botPos.distanceTo(b.standPos)
-            return distA - distB
-        })
-
-        return candidates[0]
-    }
-
-    findStandPositionForWater(waterBlock) {
-        const directions = [
-            new Vec3(1, 1, 0),
-            new Vec3(-1, 1, 0),
-            new Vec3(0, 1, 1),
-            new Vec3(0, 1, -1)
-        ]
-
-        for (const dir of directions) {
-            const standPos = waterBlock.position.plus(dir)
-
-            if (!this.isStandableSpot(standPos)) continue
-            if (this.hasCastObstructionFrom(standPos, waterBlock)) continue
-
-            return standPos
-        }
-
-        return null
-    }
-
-    isStandableSpot(standPos) {
-        const bot = this.ctx.bot
-
-        const feet = bot.blockAt(standPos)
-        const head = bot.blockAt(standPos.offset(0, 1, 0))
-        const below = bot.blockAt(standPos.offset(0, -1, 0))
-
-        if (!feet || feet.name !== 'air') return false
-        if (!head || head.name !== 'air') return false
-        if (!below) return false
-
-        if (below.name === 'air' || below.name === 'water' || below.name === 'lava') {
-            return false
-        }
-
-        return true
-    }
-
-    hasCastObstructionFrom(standPos, waterBlock) {
-        const bot = this.ctx.bot
-        const waterPos = waterBlock.position
-
-        const dx = waterPos.x - standPos.x
-        const dz = waterPos.z - standPos.z
-        const steps = Math.max(Math.abs(dx), Math.abs(dz))
-
-        if (steps === 0) return false
-
-        for (let i = 1; i <= steps; i++) {
-            const x = standPos.x + Math.round((dx * i) / steps)
-            const z = standPos.z + Math.round((dz * i) / steps)
-
-            const body = bot.blockAt(new Vec3(x, standPos.y, z))
-            const head = bot.blockAt(new Vec3(x, standPos.y + 1, z))
-
-            const blockedBody = body && body.name !== 'air' && body.name !== 'water'
-            const blockedHead = head && head.name !== 'air' && head.name !== 'water'
-
-            if (blockedBody || blockedHead) return true
-        }
-
-        return false
-    }
-
-    isUsableFishingWater(waterBlock, standPos) {
-        if (!this.hasAirAboveWater(waterBlock)) return false
-        if (this.hasCastObstructionFrom(standPos, waterBlock)) return false
-        return true
-    }
-
-    hasAirAboveWater(block) {
-        const bot = this.ctx.bot
-        if (!block || block.name !== 'water') return false
-
-        const above1 = bot.blockAt(block.position.offset(0, 1, 0))
-        const above2 = bot.blockAt(block.position.offset(0, 2, 0))
-
-        return above1?.name === 'air' && above2?.name === 'air'
-    }
-
-    isPerfectFishingWater(waterBlock, standPos) {
-        if (!this.isUsableFishingWater(waterBlock, standPos)) return false
-
-        const bot = this.ctx.bot
-        const center = waterBlock.position
-
-        // Approximate 5 x 4 x 5 check
-        // x: -2..2, z: -2..2
-        // y layers checked: -1, 0, +1, +2 relative to water block
-        for (let dx = -2; dx <= 2; dx++) {
-            for (let dz = -2; dz <= 2; dz++) {
-                const lower = bot.blockAt(center.offset(dx, -1, dz))
-                const water = bot.blockAt(center.offset(dx, 0, dz))
-                const air1 = bot.blockAt(center.offset(dx, 1, dz))
-                const air2 = bot.blockAt(center.offset(dx, 2, dz))
-
-                if (!lower || lower.name !== 'water') return false
-                if (!water || water.name !== 'water') return false
-                if (!air1 || air1.name !== 'air') return false
-                if (!air2 || air2.name !== 'air') return false
-            }
-        }
-
-        return true
-    }
-
-    async goToFishingSpot(standPos) {
-        await this.ctx.services.movement.goNear(standPos, 0.5)
-        await sleep(500)
-    }
-
-    async lookAtFishingSpot(waterBlock) {
-        const bot = this.ctx.bot
-        const botPos = bot.entity.position
-        const lookTarget = waterBlock.position.offset(0.5, 0.5, 0.5)
-
-        const dx = lookTarget.x - botPos.x
-        const dy = lookTarget.y - (botPos.y + bot.entity.height)
-        const dz = lookTarget.z - botPos.z
-
-        const yaw = Math.atan2(-dx, -dz)
-        const groundDistance = Math.sqrt(dx * dx + dz * dz)
-        const pitch = Math.atan2(dy, groundDistance)
-
-        await bot.look(yaw, pitch, true)
-        await sleep(200)
     }
 }
 </file>
@@ -791,6 +552,15 @@ for (const botDef of botDefinitions) {
 }
 </file>
 
+<file path="package.json">
+{
+  "dependencies": {
+    "mineflayer": "github:PrismarineJS/mineflayer#47a41c666f1f6e6783867ebe81e7386bbae72c24",
+    "mineflayer-pathfinder": "^2.4.5"
+  }
+}
+</file>
+
 <file path="src/config/botDefinitions.mjs">
 export const botDefinitions = [
     // {
@@ -854,6 +624,195 @@ export class BaseRole {
 }
 </file>
 
+<file path="src/services/FishingService.mjs">
+import { sleep } from '../utils/sleep.mjs'
+
+const FISHING_SEARCH_RADIUS = 16
+const FISHING_SEARCH_COUNT = 30
+
+export class FishingService {
+
+    constructor(ctx) {
+        this.ctx = ctx
+        this.busy = false
+    }
+
+    async runFishingCycle() {
+        if (this.busy) return
+        this.busy = true
+
+        try {
+            const threshold = this.ctx.config.settings?.inventoryThreshold ?? 30
+            
+            if (this.ctx.services.inventory.isInventoryNearlyFull(threshold)) {
+                console.log(`[fishing] inventory is getting full`)
+                await this.ctx.services.storage.depositExcessItems({
+                    fishing_rod: 1
+                })
+            }
+
+            const rod = this.findFishingRod()
+
+            if (!rod) {
+                console.log('[fishing] no fishing rod found in inventory')
+                return
+            }
+
+            const fishingSpot = this.findFishingSpot()
+
+            if (!fishingSpot) {
+                console.log('[fishing] no suitable water found nearby')
+                return
+            }
+
+            await this.goToFishingSpot(fishingSpot.standPos)
+            await this.ctx.bot.equip(rod, 'hand')
+            await this.lookAtFishingSpot(fishingSpot.waterBlock)
+
+            console.log('[fishing] casting line')
+            await this.ctx.bot.fish()
+            console.log('[fishing] caught something')
+            
+            await sleep(500)
+        } catch (err) {
+            console.log(`[fishing] runFishingCycle error: ${err.message}`)
+        } finally {
+            this.busy = false
+        }
+    }
+
+    findFishingRod() {
+        return this.ctx.services.inventory.findItemByName('fishing_rod')
+    }
+
+    hasAirAboveWater(block) {
+        const bot = this.ctx.bot
+        if (!block) return false
+        if (block.name !== 'water') return false
+
+        const above1 = bot.blockAt(block.position.offset(0, 1, 0))
+        const above2 = bot.blockAt(block.position.offset(0, 2, 0))
+
+        if (!above1 || above1.name !== 'air') return false
+        if (!above2 || above2.name !== 'air') return false
+
+        return true
+    }
+
+    isStandableSpot(standPos) {
+        const bot = this.ctx.bot
+
+        const feetBlock = bot.blockAt(standPos)
+        const headBlock = bot.blockAt(standPos.offset(0, 1, 0))
+        const belowBlock = bot.blockAt(standPos.offset(0, -1, 0))
+
+        if (!feetBlock || feetBlock.name !== 'air') return false
+        if (!headBlock || headBlock.name !== 'air') return false
+        if (!belowBlock) return false
+
+        // Must stand on something solid-ish
+        if (belowBlock.name === 'air' || belowBlock.name === 'water' || belowBlock.name === 'lava') {
+            return false
+        }
+
+        return true
+    }
+
+    hasCastObstructionFrom(standPos, waterBlock) {
+        const bot = this.ctx.bot
+        const waterPos = waterBlock.position
+
+        const dx = waterPos.x - standPos.x
+        const dz = waterPos.z - standPos.z
+
+        const steps = Math.max(Math.abs(dx), Math.abs(dz))
+        if (steps === 0) return false
+
+        // Check a simple line from stand position toward water
+        for (let i = 1; i <= steps; i++) {
+            const x = standPos.x + Math.round((dx * i) / steps)
+            const z = standPos.z + Math.round((dz * i) / steps)
+
+            // Check at body/head heights
+            const bodyBlock = bot.blockAt(standPos.offset(x - standPos.x, 1, z - standPos.z))
+            const headBlock = bot.blockAt(standPos.offset(x - standPos.x, 2, z - standPos.z))
+
+            const blockedBody = bodyBlock && bodyBlock.name !== 'air' && bodyBlock.name !== 'water'
+            const blockedHead = headBlock && headBlock.name !== 'air' && headBlock.name !== 'water'
+
+            if (blockedBody || blockedHead) {
+                return true
+            }
+        }
+
+        return false
+    }
+
+    findFishingSpot() {
+        const bot = this.ctx.bot
+
+        const positions = bot.findBlocks({
+            maxDistance: FISHING_SEARCH_RADIUS,
+            count: FISHING_SEARCH_COUNT,
+            matching: (block) => {
+                if (!block) return false
+                return block.name === 'water'
+            }
+        })
+
+        const directions = [
+            { x: 1, z: 0 },
+            { x: -1, z: 0 },
+            { x: 0, z: 1 },
+            { x: 0, z: -1 }
+        ]
+
+        for (const pos of positions) {
+            const waterBlock = bot.blockAt(pos)
+            if (!waterBlock) continue
+            if (!waterBlock.position) continue
+            if (!this.hasAirAboveWater(waterBlock)) continue
+
+            for (const dir of directions) {
+                const standPos = waterBlock.position.offset(dir.x, 1, dir.z)
+
+                if (!this.isStandableSpot(standPos)) continue
+                if (this.hasCastObstructionFrom(standPos, waterBlock)) continue
+
+                return {
+                    waterBlock,
+                    standPos
+                }
+            }
+        }
+
+        return null
+    }
+
+    async goToFishingSpot(standPos) {
+        await this.ctx.services.movement.goNear(standPos, 0.5)
+        await sleep(500)
+    }
+
+    async lookAtFishingSpot(waterBlock) {
+        const bot = this.ctx.bot
+        const botPos = bot.entity.position
+        const lookTarget = waterBlock.position.offset(0.5, 0.5, 0.5)
+
+        const dx = lookTarget.x - botPos.x
+        const dy = lookTarget.y - (botPos.y + bot.entity.height)
+        const dz = lookTarget.z - botPos.z
+
+        const yaw = Math.atan2(-dx, -dz)
+        const groundDistance = Math.sqrt(dx * dx + dz * dz)
+        const pitch = Math.atan2(dy, groundDistance)
+
+        await bot.look(yaw, pitch, true)
+        await sleep(500)
+    }
+}
+</file>
+
 <file path="src/services/StorageService.mjs">
 import { sleep } from "../utils/sleep.mjs"
 
@@ -893,6 +852,10 @@ export class StorageService {
         const bot = this.ctx.bot
 
         await this.ctx.services.movement.goNear(chestBlock.position, 2)
+
+        await this.ctx.services.movement.lookAt(chestBlock.position.offset(0.5, 0.5, 0.5))
+
+        await sleep(200)
 
         let chest
 
@@ -1102,6 +1065,20 @@ export class FarmingService {
         let crop = null
 
         try {
+            const threshold = this.ctx.config.settings?.inventoryThreshold ?? 30
+
+            if (this.ctx.services.inventory.isInventoryNearlyFull(threshold)) {
+                console.log(`[farming] inventory is getting full`)
+
+                await this.ctx.services.storage.depositExcessItems({
+                    wheat_seeds: 32,
+                    beetroot_seeds: 32,
+                    carrot: 32,
+                    potato: 32,
+                    nether_wart: 32
+                })
+            }
+            
             crop = await this.findHarvestableCrop()
 
             if (!crop) {
@@ -1133,19 +1110,6 @@ export class FarmingService {
                 this.markTargetCooldown(pos, 4000)
             }
 
-            const threshold = this.ctx.config.settings?.inventoryThreshold ?? 30
-
-            if (this.ctx.services.inventory.isInventoryNearlyFull(threshold)) {
-                console.log(`[farming] inventory is getting full`)
-
-                await this.ctx.services.storage.depositExcessItems({
-                    wheat_seeds: 32,
-                    beetroot_seeds: 32,
-                    carrot: 32,
-                    potato: 32,
-                    nether_wart: 32
-                })
-            }
 
         } catch (err) {
             console.error(`[farming] runFarmingCycle error: ${err.message}`)
@@ -1161,9 +1125,9 @@ export class FarmingService {
     async harvestCrop(block) {
         if (!block) return
 
-        console.log(`[farming] harvesting ${block.name}`)
+        // console.log(`[farming] harvesting ${block.name}`)
         await this.ctx.bot.dig(block)
-        console.log('[farming] harvest complete')
+        // console.log('[farming] harvest complete')
     }
 
     async findHarvestableCrop() {

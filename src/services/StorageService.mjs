@@ -37,6 +37,10 @@ export class StorageService {
 
         await this.ctx.services.movement.goNear(chestBlock.position, 2)
 
+        await this.ctx.services.movement.lookAt(chestBlock.position.offset(0.5, 0.5, 0.5))
+
+        await sleep(200)
+
         let chest
 
         try {

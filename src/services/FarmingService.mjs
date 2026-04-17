@@ -15,6 +15,20 @@ export class FarmingService {
         let crop = null
 
         try {
+            const threshold = this.ctx.config.settings?.inventoryThreshold ?? 30
+
+            if (this.ctx.services.inventory.isInventoryNearlyFull(threshold)) {
+                console.log(`[farming] inventory is getting full`)
+
+                await this.ctx.services.storage.depositExcessItems({
+                    wheat_seeds: 32,
+                    beetroot_seeds: 32,
+                    carrot: 32,
+                    potato: 32,
+                    nether_wart: 32
+                })
+            }
+            
             crop = await this.findHarvestableCrop()
 
             if (!crop) {
@@ -46,19 +60,6 @@ export class FarmingService {
                 this.markTargetCooldown(pos, 4000)
             }
 
-            const threshold = this.ctx.config.settings?.inventoryThreshold ?? 30
-
-            if (this.ctx.services.inventory.isInventoryNearlyFull(threshold)) {
-                console.log(`[farming] inventory is getting full`)
-
-                await this.ctx.services.storage.depositExcessItems({
-                    wheat_seeds: 32,
-                    beetroot_seeds: 32,
-                    carrot: 32,
-                    potato: 32,
-                    nether_wart: 32
-                })
-            }
 
         } catch (err) {
             console.error(`[farming] runFarmingCycle error: ${err.message}`)
@@ -74,9 +75,9 @@ export class FarmingService {
     async harvestCrop(block) {
         if (!block) return
 
-        console.log(`[farming] harvesting ${block.name}`)
+        // console.log(`[farming] harvesting ${block.name}`)
         await this.ctx.bot.dig(block)
-        console.log('[farming] harvest complete')
+        // console.log('[farming] harvest complete')
     }
 
     async findHarvestableCrop() {
