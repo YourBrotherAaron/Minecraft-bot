@@ -133,12 +133,7 @@ export class FishingService {
             }
         })
 
-        const directions = [
-            { x: 1, z: 0 },
-            { x: -1, z: 0 },
-            { x: 0, z: 1 },
-            { x: 0, z: -1 }
-        ]
+        const candidates = []
 
         for (const pos of positions) {
             const waterBlock = bot.blockAt(pos)
@@ -146,20 +141,88 @@ export class FishingService {
             if (!waterBlock.position) continue
             if (!this.hasAirAboveWater(waterBlock)) continue
 
-            for (const dir of directions) {
-                const standPos = waterBlock.position.offset(dir.x, 1, dir.z)
+            const depth = this.getWaterDepth(waterBlock)
+            if (depth <= 0) continue
+
+            const standPos = this.findNearbyStandingPos(waterBlock, 3)
+            if (!standPos) continue
+
+            if (this.hasCastObstructionFrom(standPos, waterBlock)) continue
+
+            const beachDistance = this.getHorizontalDistance(standPos, waterBlock.position)
+
+            candidates.push({
+                waterBlock,
+                standPos,
+                depth,
+                beachDistance
+            })
+        }
+
+        if (candidates.length === 0) return null
+
+        candidates.sort((a, b) => {
+            if (b.depth !== a.depth) return b.depth - a.depth
+            if (a.beachDistance !== b.beachDistance) return a.beachDistance - b.beachDistance
+
+            const distA = a.standPos.distanceTo(bot.entity.position)
+            const distB = b.standPos.distanceTo(bot.entity.position)
+            return distA - distB
+        })
+
+        return {
+            waterBlock: candidates[0].waterBlock,
+            standPos: candidates[0].standPos
+        }
+    }
+
+    getWaterDepth(waterBlock) {
+        const bot = this.ctx.bot
+
+        let depth = 0
+
+        let pos = waterBlock.position.clone()
+
+        while (true) {
+            const block = bot.blockAt(pos)
+            if (!block || block.name !== 'water') break
+
+            depth++
+            pos = pos.offset(0, -1, 0)
+        }
+
+        return depth
+    }
+
+    findNearbyStandingPos(waterBlock, maxDistance = 3) {
+        const possibleStandPos = []
+
+        for (let dx = -maxDistance; dx <= maxDistance; dx++) {
+            for (let dz = -maxDistance; dz <= maxDistance; dz++) {
+                if (dx === 0 && dz === 0) continue
+
+                const horizontalDistance = Math.abs(dx) + Math.abs(dz)
+                if (horizontalDistance > maxDistance) continue
+
+                const standPos = waterBlock.position.offset(dx, 1, dz)
 
                 if (!this.isStandableSpot(standPos)) continue
-                if (this.hasCastObstructionFrom(standPos, waterBlock)) continue
 
-                return {
-                    waterBlock,
-                    standPos
-                }
+                possibleStandPos.push({
+                    standPos,
+                    distance: horizontalDistance
+                })
             }
         }
 
-        return null
+        if (possibleStandPos.length === 0) return null
+
+        possibleStandPos.sort((a, b) => a.distance - b.distance)
+        return possibleStandPos[0].standPos
+    }
+
+    getHorizontalDistance(posA, posB) {
+        return Math.abs(posA.x - posB.x) + Math.abs(posA.z - posB.z)
     }
 
     async goToFishingSpot(standPos) {
