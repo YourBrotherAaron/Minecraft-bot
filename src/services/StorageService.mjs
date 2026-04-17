@@ -11,7 +11,7 @@ export class StorageService {
 
         const positions = bot.findBlocks({
             maxDistance,
-            count: 20,
+            count: maxCount,
             matching: (block) => {
                 if(!block) return false
                 return block.name === 'chest'
@@ -37,7 +37,7 @@ export class StorageService {
 
         await this.ctx.services.movement.goNear(chestBlock.position, 2)
 
-        await this.ctx.services.movement.lookAt(chestBlock.position.offset(0.5, 0.5, 0.5))
+        await this.ctx.bot.lookAt(chestBlock.position.offset(0.5, 0.5, 0.5))
 
         await sleep(200)
 

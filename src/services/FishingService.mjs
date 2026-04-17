@@ -232,18 +232,9 @@ export class FishingService {
 
     async lookAtFishingSpot(waterBlock) {
         const bot = this.ctx.bot
-        const botPos = bot.entity.position
-        const lookTarget = waterBlock.position.offset(0.5, 0.5, 0.5)
 
-        const dx = lookTarget.x - botPos.x
-        const dy = lookTarget.y - (botPos.y + bot.entity.height)
-        const dz = lookTarget.z - botPos.z
+        await bot.lookAt(waterBlock.position.offset(0.5, 0.5, 0.5), true)
 
-        const yaw = Math.atan2(-dx, -dz)
-        const groundDistance = Math.sqrt(dx * dx + dz * dz)
-        const pitch = Math.atan2(dy, groundDistance)
-
-        await bot.look(yaw, pitch, true)
         await sleep(500)
     }
 }
