@@ -8,9 +8,11 @@ import { MovementService } from '../services/MovementService.mjs'
 import { ItemPickupService } from '../services/ItemPickupService.mjs'
 import { InventoryService } from '../services/InventoryService.mjs'
 import { StorageService } from '../services/StorageService.mjs'
+import { platform } from 'process'
 
 const require = createRequire(import.meta.url)
 const { pathfinder } = require('mineflayer-pathfinder')
+
 
 export class BotManager {
     constructor(config, role) {
@@ -43,6 +45,8 @@ export class BotManager {
 
         this.bot.once('spawn', async () => {
             console.log(`[${this.bot.username}] spawned`)
+            this.bot.physics.yawSpeed = 6000
+            this.bot.physics.pitchSpeed = 6000
 
             await sleep(5000)
             await this.role.start(this.ctx)
@@ -54,7 +58,7 @@ export class BotManager {
             console.log(`[${this.bot.username}] logged in`)
         })
 
-        this.bot.on('messagestr', (message, messagePosition) => {
+        this.bot.on('messagestr', async (message, messagePosition) => {
             if (messagePosition === 'chat' && message.includes('quit')) {
                 this.bot.quit()
             }
