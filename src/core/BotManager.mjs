@@ -8,11 +8,12 @@ import { MovementService } from '../services/MovementService.mjs'
 import { ItemPickupService } from '../services/ItemPickupService.mjs'
 import { InventoryService } from '../services/InventoryService.mjs'
 import { StorageService } from '../services/StorageService.mjs'
-import { platform } from 'process'
 
 const require = createRequire(import.meta.url)
-const { pathfinder } = require('mineflayer-pathfinder')
+const { createPlugin, goals } = require('@nxg-org/mineflayer-pathfinder')
+const { GoalNear } = goals
 
+const pathfinder = createPlugin()
 
 export class BotManager {
     constructor(config, role) {
@@ -24,7 +25,6 @@ export class BotManager {
 
     async start() {
         this.bot = mineflayer.createBot(this.config)
-        this.bot.loadPlugin(pathfinder)
 
         this.ctx = new BotContext({
             bot: this.bot,
@@ -44,9 +44,12 @@ export class BotManager {
         this.registerEvents()
 
         this.bot.once('spawn', async () => {
+            this.bot.loadPlugin(pathfinder)
+
             console.log(`[${this.bot.username}] spawned`)
             this.bot.physics.yawSpeed = 6000
             this.bot.physics.pitchSpeed = 6000
+            this.bot.physics.autojumpCooldown = 0
 
             await sleep(5000)
             await this.role.start(this.ctx)
@@ -56,6 +59,40 @@ export class BotManager {
     registerEvents() {
         this.bot.on('login', () => {
             console.log(`[${this.bot.username}] logged in`)
+        })
+
+        this.bot.on('chat', async (username, message) => {
+            if (username === this.bot.username) return
+            if (message.toLowerCase() !== 'come to me') return
+            if (!this.bot.pathfinder) return
+
+            const player = this.bot.players[username]
+            const entity = player?.entity
+
+            if (!entity) {
+                console.log(`[${this.bot.username}] cannot see ${username}`)
+                return
+            }
+
+            try {
+                console.log(
+                    `[${this.bot.username}] coming to ${username} at ` +
+                    `${entity.position.x.toFixed(2)}, ${entity.position.y.toFixed(2)}, ${entity.position.z.toFixed(2)}`
+                )
+
+                await this.bot.pathfinder.goto(
+                    new GoalNear(
+                        Math.floor(entity.position.x),
+                        Math.floor(entity.position.y),
+                        Math.floor(entity.position.z),
+                        2
+                    )
+                )
+
+                console.log(`[${this.bot.username}] reached ${username}`)
+            } catch (err) {
+                console.error(`[${this.bot.username}] come to me failed: ${err.message}`)
+            }
         })
 
         this.bot.on('messagestr', async (message, messagePosition) => {

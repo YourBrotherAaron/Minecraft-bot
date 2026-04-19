@@ -1,7 +1,6 @@
 {
   "dependencies": {
-    "@nxg-org/mineflayer-pathfinder": "^0.0.26",
-    "mineflayer": "github:GenerelSchwerz/mineflayer#dev",
-    "mineflayer-pathfinder": "^2.4.5"
+    "@nxg-org/mineflayer-pathfinder": "file:../../../../Desktop/Genn forks/minecraft-pathfinding",
+    "mineflayer": "github:GenerelSchwerz/mineflayer#dev"
   }
 }

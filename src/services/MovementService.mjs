@@ -1,7 +1,7 @@
 import { createRequire } from 'module'
 
 const require = createRequire(import.meta.url)
-const { Movements, goals } = require('mineflayer-pathfinder')
+const { Movements, goals } = require('@nxg-org/mineflayer-pathfinder')
 const { GoalNear } = goals
 
 export class MovementService {
@@ -17,11 +17,12 @@ export class MovementService {
             throw new Error('Pathfinder plugin is not loaded')
         }
 
-        if (!this.movements) {
-            this.movements = new Movements(bot)
-            this.movements.canDig = false
-            this.movements.allow1by1towers = false
-            bot.pathfinder.setMovements(this.movements)
+        if (!this.ready) {
+            bot.pathfinder.setMoveOptions({
+                canDig: false
+            })
+
+            this.ready = true
         }
     }
 
